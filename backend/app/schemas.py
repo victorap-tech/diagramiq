@@ -86,3 +86,11 @@ class DocumentProcessResponse(BaseModel):
     processing_status: str
     processed_pages: int
     message: str
+
+class ComponentReferenceResponse(BaseModel):
+    id: int
+    reference: str
+    component_type: str | None = None
+    document_page_id: int
+
+    model_config = ConfigDict(from_attributes=True)
