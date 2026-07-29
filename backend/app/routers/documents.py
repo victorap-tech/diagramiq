@@ -1,4 +1,3 @@
-import os
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -17,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.services.pdf_service import process_pdf_document
 
 
 router = APIRouter(
@@ -58,7 +58,7 @@ def upload_document(
     if not clean_title:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="El título del documento es obligatorio",
+            detail="El título es obligatorio",
         )
 
     original_filename = file.filename or "document.pdf"
@@ -67,7 +67,7 @@ def upload_document(
     if extension != ".pdf":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Por ahora solo se permiten archivos PDF",
+            detail="Solo se permiten archivos PDF",
         )
 
     stored_filename = f"{uuid4().hex}.pdf"
@@ -75,7 +75,10 @@ def upload_document(
 
     try:
         with file_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
+            shutil.copyfileobj(
+                file.file,
+                destination,
+            )
 
         pdf = fitz.open(file_path)
         page_count = pdf.page_count
@@ -87,7 +90,7 @@ def upload_document(
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se pudo procesar el PDF: {str(exc)}",
+            detail=f"PDF inválido: {str(exc)}",
         )
 
     new_document = models.Document(
@@ -107,6 +110,52 @@ def upload_document(
     return new_document
 
 
+@router.post(
+    "/{document_id}/process",
+    response_model=schemas.DocumentProcessResponse,
+)
+def process_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(models.Document)
+        .filter(models.Document.id == document_id)
+        .first()
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado",
+        )
+
+    try:
+        processed_pages = process_pdf_document(
+            document=document,
+            db=db,
+        )
+
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error procesando el PDF: {str(exc)}",
+        )
+
+    return schemas.DocumentProcessResponse(
+        document_id=document.id,
+        processing_status=document.processing_status,
+        processed_pages=processed_pages,
+        message="Documento procesado correctamente",
+    )
+
+
 @router.get(
     "",
     response_model=list[schemas.DocumentResponse],
@@ -122,7 +171,68 @@ def list_documents(
             models.Document.equipment_id == equipment_id
         )
 
-    return query.order_by(models.Document.id.desc()).all()
+    return (
+        query
+        .order_by(models.Document.id.desc())
+        .all()
+    )
+
+
+@router.get(
+    "/{document_id}/pages",
+    response_model=list[schemas.DocumentPageResponse],
+)
+def list_document_pages(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(models.Document)
+        .filter(models.Document.id == document_id)
+        .first()
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado",
+        )
+
+    return (
+        db.query(models.DocumentPage)
+        .filter(
+            models.DocumentPage.document_id == document_id
+        )
+        .order_by(models.DocumentPage.page_number.asc())
+        .all()
+    )
+
+
+@router.get(
+    "/{document_id}/pages/{page_number}",
+    response_model=schemas.DocumentPageResponse,
+)
+def get_document_page(
+    document_id: int,
+    page_number: int,
+    db: Session = Depends(get_db),
+):
+    page = (
+        db.query(models.DocumentPage)
+        .filter(
+            models.DocumentPage.document_id == document_id,
+            models.DocumentPage.page_number == page_number,
+        )
+        .first()
+    )
+
+    if page is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Página no encontrada",
+        )
+
+    return page
 
 
 @router.get(
@@ -167,6 +277,13 @@ def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Documento no encontrado",
         )
+
+    for page in document.pages:
+        if page.image_path:
+            image_path = Path(page.image_path)
+
+            if image_path.exists():
+                image_path.unlink()
 
     file_path = Path(document.file_path)
 
