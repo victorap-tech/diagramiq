@@ -133,3 +133,8 @@ class Document(Base):
         "Equipment",
         back_populates="documents",
     )
+    pages = relationship(
+        "DocumentPage",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
