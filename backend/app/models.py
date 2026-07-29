@@ -175,6 +175,11 @@ class DocumentPage(Base):
         "Document",
         back_populates="pages",
     )
+    references = relationship(
+        "ComponentReference",
+        back_populates="document_page",
+        cascade="all, delete-orphan",
+    )
 
 class ComponentReference(Base):
     __tablename__ = "component_references"
