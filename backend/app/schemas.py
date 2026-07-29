@@ -60,16 +60,30 @@ class EquipmentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class DocumentCreate(BaseModel):
+    title: str
+    description: str | None = None
+    document_type: str | None = None
+    sector_id: int
+    equipment_id: int | None = None
+
+
 class DocumentResponse(BaseModel):
     id: int
     title: str
     filename: str
+    file_path: str
+    description: str | None = None
     document_type: str | None = None
     page_count: int | None = None
     processing_status: str
-    equipment_id: int
+
+    sector_id: int
+    equipment_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class DocumentPageResponse(BaseModel):
     id: int
@@ -87,10 +101,18 @@ class DocumentProcessResponse(BaseModel):
     processed_pages: int
     message: str
 
+
 class ComponentReferenceResponse(BaseModel):
     id: int
     reference: str
+    normalized_reference: str | None = None
     component_type: str | None = None
+
+    x: int | None = None
+    y: int | None = None
+    width: int | None = None
+    height: int | None = None
+
     document_page_id: int
 
     model_config = ConfigDict(from_attributes=True)
