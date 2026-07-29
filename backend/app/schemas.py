@@ -59,3 +59,14 @@ class EquipmentResponse(BaseModel):
     sector_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class DocumentResponse(BaseModel):
+    id: int
+    title: str
+    filename: str
+    document_type: str | None = None
+    page_count: int | None = None
+    processing_status: str
+    equipment_id: int
+
+    model_config = ConfigDict(from_attributes=True)
