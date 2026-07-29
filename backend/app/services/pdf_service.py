@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import fitz
@@ -10,18 +11,72 @@ PAGE_IMAGE_DIR = Path("uploads/pages")
 PAGE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+REFERENCE_PATTERN = re.compile(
+    r"\b(?:"
+    r"KM\d+[A-Z0-9_-]*|"
+    r"KA\d+[A-Z0-9_-]*|"
+    r"QF\d+[A-Z0-9_-]*|"
+    r"QS\d+[A-Z0-9_-]*|"
+    r"M\d+[A-Z0-9_-]*|"
+    r"B\d+[A-Z0-9_-]*|"
+    r"X\d+[A-Z0-9_-]*|"
+    r"PLC\d+[A-Z0-9_-]*|"
+    r"DI\d+[A-Z0-9_-]*|"
+    r"DO\d+[A-Z0-9_-]*|"
+    r"AI\d+[A-Z0-9_-]*|"
+    r"AO\d+[A-Z0-9_-]*|"
+    r"\d+[A-Z]\d+[A-Z0-9_-]*"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def classify_reference(reference: str) -> str:
+    value = reference.upper()
+
+    if value.startswith("KM"):
+        return "Contactor"
+
+    if value.startswith("KA"):
+        return "Relé"
+
+    if value.startswith("QF"):
+        return "Interruptor automático"
+
+    if value.startswith("QS"):
+        return "Seccionador"
+
+    if value.startswith("PLC"):
+        return "PLC"
+
+    if value.startswith(("DI", "DO", "AI", "AO")):
+        return "Entrada o salida"
+
+    if value.startswith("M"):
+        return "Motor"
+
+    if value.startswith("B"):
+        return "Sensor"
+
+    if value.startswith("X"):
+        return "Bornera o conector"
+
+    return "Referencia técnica"
+
+
+def extract_references(text: str) -> list[str]:
+    if not text:
+        return []
+
+    matches = REFERENCE_PATTERN.findall(text.upper())
+
+    return sorted(set(matches))
+
+
 def process_pdf_document(
     document: models.Document,
     db: Session,
 ) -> int:
-    """
-    Procesa un PDF página por página.
-
-    - Extrae texto.
-    - Genera una imagen PNG.
-    - Registra cada página en la base de datos.
-    """
-
     pdf_path = Path(document.file_path)
 
     if not pdf_path.exists():
@@ -93,10 +148,21 @@ def process_pdf_document(
             )
 
             db.add(new_page)
+            db.flush()
+
+            references = extract_references(text_content)
+
+            for reference in references:
+                new_reference = models.ComponentReference(
+                    reference=reference,
+                    component_type=classify_reference(reference),
+                    document_page_id=new_page.id,
+                )
+
+                db.add(new_reference)
+
             processed_pages += 1
 
-            # Guardamos en bloques para no acumular
-            # cientos de objetos en memoria.
             if processed_pages % 20 == 0:
                 db.commit()
 
