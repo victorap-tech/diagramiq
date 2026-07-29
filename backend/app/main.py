@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app import models
 from app.database import Base, engine
 from app.routers import (
+    references,
     search,
     documents,
     organizations,
@@ -31,7 +32,7 @@ app.include_router(sectors.router)
 app.include_router(equipments.router)
 app.include_router(documents.router)
 app.include_router(search.router)
-
+app.include_router(references.router)
 # ==========================
 # Sistema
 # ==========================
