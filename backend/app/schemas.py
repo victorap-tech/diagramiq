@@ -70,3 +70,19 @@ class DocumentResponse(BaseModel):
     equipment_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class DocumentPageResponse(BaseModel):
+    id: int
+    page_number: int
+    text_content: str | None = None
+    image_path: str | None = None
+    document_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentProcessResponse(BaseModel):
+    document_id: int
+    processing_status: str
+    processed_pages: int
+    message: str
