@@ -100,6 +100,11 @@ class Equipment(Base):
         "Sector",
         back_populates="equipments",
     )
+    documents = relationship(
+        "Document",
+        back_populates="equipment",
+        cascade="all, delete-orphan",
+    )
 class Document(Base):
     __tablename__ = "documents"
 
