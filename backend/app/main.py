@@ -5,10 +5,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import Base, engine, get_db
 
-
-# Crea las tablas definidas en models.py al iniciar la aplicación.
+# Crear tablas
 Base.metadata.create_all(bind=engine)
-
 
 app = FastAPI(
     title="DiagramIQ API",
@@ -29,10 +27,12 @@ def root():
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-    }
+    return {"status": "healthy"}
 
+
+# ===========================
+# EMPRESAS
+# ===========================
 
 @app.post(
     "/organizations",
@@ -51,7 +51,7 @@ def create_organization(
 
     if not new_organization.name:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="El nombre de la empresa es obligatorio",
         )
 
@@ -63,7 +63,7 @@ def create_organization(
     except IntegrityError:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=409,
             detail="Ya existe una empresa con ese nombre",
         )
 
@@ -75,12 +75,10 @@ def create_organization(
     response_model=list[schemas.OrganizationResponse],
     tags=["Empresas"],
 )
-def list_organizations(
-    db: Session = Depends(get_db),
-):
+def list_organizations(db: Session = Depends(get_db)):
     return (
         db.query(models.Organization)
-        .order_by(models.Organization.name.asc())
+        .order_by(models.Organization.name)
         .all()
     )
 
@@ -102,7 +100,7 @@ def get_organization(
 
     if organization is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=404,
             detail="Empresa no encontrada",
         )
 
@@ -126,11 +124,63 @@ def delete_organization(
 
     if organization is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=404,
             detail="Empresa no encontrada",
         )
 
     db.delete(organization)
     db.commit()
 
-    return None
+
+# ===========================
+# PLANTAS
+# ===========================
+
+@app.post(
+    "/plants",
+    response_model=schemas.PlantResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Plantas"],
+)
+def create_plant(
+    plant: schemas.PlantCreate,
+    db: Session = Depends(get_db),
+):
+    organization = (
+        db.query(models.Organization)
+        .filter(models.Organization.id == plant.organization_id)
+        .first()
+    )
+
+    if organization is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Empresa no encontrada",
+        )
+
+    new_plant = models.Plant(
+        name=plant.name,
+        location=plant.location,
+        organization_id=plant.organization_id,
+    )
+
+    db.add(new_plant)
+    db.commit()
+    db.refresh(new_plant)
+
+    return new_plant
+
+
+@app.get(
+    "/plants",
+    response_model=list[schemas.PlantResponse],
+    tags=["Plantas"],
+)
+def list_plants(
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(models.Plant)
+        .order_by(models.Plant.name)
+        .all()
+    )
