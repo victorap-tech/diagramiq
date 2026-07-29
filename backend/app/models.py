@@ -175,3 +175,35 @@ class DocumentPage(Base):
         "Document",
         back_populates="pages",
     )
+
+class ComponentReference(Base):
+    __tablename__ = "component_references"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    reference = Column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    component_type = Column(
+        String(100),
+        nullable=True,
+    )
+
+    document_page_id = Column(
+        Integer,
+        ForeignKey("document_pages.id"),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    document_page = relationship(
+        "DocumentPage",
+        back_populates="references",
+    )
