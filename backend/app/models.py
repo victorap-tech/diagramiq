@@ -133,8 +133,45 @@ class Document(Base):
         "Equipment",
         back_populates="documents",
     )
+
     pages = relationship(
         "DocumentPage",
         back_populates="document",
         cascade="all, delete-orphan",
+    )
+
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    page_number = Column(
+        Integer,
+        nullable=False,
+    )
+
+    text_content = Column(
+        Text,
+        nullable=True,
+    )
+
+    image_path = Column(
+        String(500),
+        nullable=True,
+    )
+
+    document_id = Column(
+        Integer,
+        ForeignKey("documents.id"),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    document = relationship(
+        "Document",
+        back_populates="pages",
     )
