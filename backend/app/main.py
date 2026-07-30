@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from app.database import Base, engine
+from app.services.storage_service import storage_enabled, bucket_name
 from app.routers import (
     documents,
     equipments,
@@ -45,7 +46,7 @@ ensure_reference_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.6.0",
+    version="0.6.4",
 )
 
 # Ruta absoluta de la carpeta app
@@ -86,4 +87,7 @@ def frontend():
 def health():
     return {
         "status": "healthy",
+        "storage": "railway_bucket" if storage_enabled() else "local",
+        "bucket_configured": storage_enabled(),
+        "bucket_name": bucket_name() if storage_enabled() else None,
     }

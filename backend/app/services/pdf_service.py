@@ -5,6 +5,7 @@ import fitz
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services.storage_service import resolve_local_file
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -270,7 +271,7 @@ def find_text_coordinates(
     document = None
 
     try:
-        document = fitz.open(str(pdf_path))
+        document = fitz.open(str(resolve_local_file(pdf_path)))
 
         if page_number > document.page_count:
             return None
@@ -334,7 +335,7 @@ def extract_match_context(
 
     document = None
     try:
-        document = fitz.open(str(pdf_path))
+        document = fitz.open(str(resolve_local_file(pdf_path)))
         if page_number > document.page_count:
             return empty
 
@@ -420,7 +421,7 @@ def process_pdf_document(
     document: models.Document,
     db: Session,
 ) -> int:
-    pdf_path = Path(document.file_path)
+    pdf_path = resolve_local_file(document.file_path)
 
     if not pdf_path.exists():
         raise FileNotFoundError(

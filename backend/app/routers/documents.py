@@ -13,13 +13,16 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import SessionLocal, get_db
 from app.services.pdf_service import process_pdf_document
+from app.services.storage_service import (
+    delete_file, get_object_stream, is_s3_path, storage_enabled, upload_file,
+)
 
 
 router = APIRouter(
@@ -196,7 +199,7 @@ def upload_document(
         )
 
     stored_filename = f"{uuid4().hex}.pdf"
-    file_path = UPLOAD_DIR / stored_filename
+    file_path = UPLOAD_DIR / f"tmp_{stored_filename}"
 
     try:
         with file_path.open("wb") as destination:
@@ -237,10 +240,24 @@ def upload_document(
         else None
     )
 
+    object_key = f"documents/{sector.plant.organization_id}/{sector.plant_id}/{sector.id}/{stored_filename}"
+    try:
+        stored_path = upload_file(file_path, object_key)
+    except Exception as exc:
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No se pudo guardar el PDF en el Bucket: {str(exc)}",
+        )
+    finally:
+        if file_path.exists():
+            file_path.unlink()
+
     new_document = models.Document(
         title=clean_title,
         filename=original_filename,
-        file_path=str(file_path),
+        file_path=stored_path,
         description=clean_description,
         document_type=clean_document_type,
         page_count=page_count,
@@ -257,8 +274,10 @@ def upload_document(
     except Exception as exc:
         db.rollback()
 
-        if file_path.exists():
-            file_path.unlink()
+        try:
+            delete_file(stored_path)
+        except Exception:
+            pass
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -458,20 +477,29 @@ def open_document_file(
             detail="Documento no encontrado",
         )
 
+    if is_s3_path(document.file_path):
+        try:
+            body, content_length = get_object_stream(document.file_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No se pudo leer el PDF del Bucket: {str(exc)}",
+            )
+        headers = {
+            "Content-Disposition": f'inline; filename="{document.filename}"',
+            "Accept-Ranges": "bytes",
+        }
+        if content_length is not None:
+            headers["Content-Length"] = str(content_length)
+        return StreamingResponse(body, media_type="application/pdf", headers=headers)
+
     file_path = Path(document.file_path)
     if not file_path.is_absolute():
         file_path = BASE_DIR / file_path
-
     if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="El archivo PDF ya no existe en el servidor",
-        )
-
+        raise HTTPException(status_code=404, detail="El archivo PDF ya no existe")
     return FileResponse(
-        path=file_path,
-        media_type="application/pdf",
-        filename=document.filename,
+        path=file_path, media_type="application/pdf", filename=document.filename,
         content_disposition_type="inline",
     )
 
@@ -525,7 +553,7 @@ def delete_document(
         if page.image_path
     ]
 
-    pdf_file_path = Path(document.file_path)
+    document_storage_path = document.file_path
 
     try:
         db.delete(document)
@@ -543,7 +571,9 @@ def delete_document(
         if image_path.exists():
             image_path.unlink()
 
-    if pdf_file_path.exists():
-        pdf_file_path.unlink()
+    try:
+        delete_file(document_storage_path)
+    except Exception:
+        pass
 
     return None
