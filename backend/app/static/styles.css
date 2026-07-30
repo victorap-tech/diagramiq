@@ -824,3 +824,31 @@ textarea {
         margin-left: 55px;
     }
 }
+
+.document-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.document-open-button {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 720px) {
+    .document-card-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .document-open-button,
+    .document-delete-button {
+        flex: 1;
+        min-width: 120px;
+    }
+}

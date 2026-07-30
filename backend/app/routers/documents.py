@@ -12,6 +12,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -26,7 +27,8 @@ router = APIRouter(
 )
 
 
-UPLOAD_DIR = Path("uploads/documents")
+BASE_DIR = Path(__file__).resolve().parents[2]
+UPLOAD_DIR = BASE_DIR / "uploads" / "documents"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -389,6 +391,43 @@ def get_document_page(
         )
 
     return page
+
+
+
+
+@router.get("/{document_id}/file", include_in_schema=False)
+def open_document_file(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(models.Document)
+        .filter(models.Document.id == document_id)
+        .first()
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado",
+        )
+
+    file_path = Path(document.file_path)
+    if not file_path.is_absolute():
+        file_path = BASE_DIR / file_path
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El archivo PDF ya no existe en el servidor",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=document.filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.get(

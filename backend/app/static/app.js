@@ -1745,9 +1745,23 @@ function renderDocuments(documents) {
                         </div>
                     </div>
 
-                    <span class="status-badge ${statusClass(status)}">
-                        ${escapeHtml(translateStatus(status))}
-                    </span>
+                    <div class="document-card-actions">
+                        <span class="status-badge ${statusClass(status)}">
+                            ${escapeHtml(translateStatus(status))}
+                        </span>
+                        <a
+                            class="secondary-button document-open-button"
+                            href="${API.documents}/${escapeHtml(documentItem.id)}/file"
+                            target="_blank"
+                            rel="noopener"
+                        >Ver PDF</a>
+                        <button
+                            class="danger-button document-delete-button"
+                            type="button"
+                            data-document-id="${escapeHtml(documentItem.id)}"
+                            data-document-title="${escapeHtml(title)}"
+                        >Eliminar</button>
+                    </div>
                 </article>
             `;
         })
@@ -1777,11 +1791,34 @@ async function loadDocuments() {
 }
 
 
+async function handleDocumentsListClick(event) {
+    const button = event.target.closest(".document-delete-button");
+    if (!button) return;
+
+    const documentId = button.dataset.documentId;
+    const documentTitle = button.dataset.documentTitle || "este documento";
+
+    if (!confirm(`¿Eliminar “${documentTitle}”? Esta acción no se puede deshacer.`)) {
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Eliminando...";
+
+    try {
+        await apiRequest(`${API.documents}/${documentId}`, { method: "DELETE" });
+        showMessage(elements.documentsMessage, "Documento eliminado correctamente.", "success");
+        await loadDocuments();
+    } catch (error) {
+        showMessage(elements.documentsMessage, `No se pudo eliminar: ${error.message}`, "error");
+        button.disabled = false;
+        button.textContent = "Eliminar";
+    }
+}
+
 function initializeDocumentEvents() {
-    elements.refreshDocumentsButton?.addEventListener(
-        "click",
-        loadDocuments
-    );
+    elements.refreshDocumentsButton?.addEventListener("click", loadDocuments);
+    elements.documentsList?.addEventListener("click", handleDocumentsListClick);
 }
 
 

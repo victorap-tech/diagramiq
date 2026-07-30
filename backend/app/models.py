@@ -77,6 +77,11 @@ class Sector(Base):
         back_populates="sector",
         cascade="all, delete-orphan",
     )
+    documents = relationship(
+        "Document",
+        back_populates="sector",
+        cascade="all, delete-orphan",
+    )
 
 
 class Equipment(Base):
@@ -112,6 +117,7 @@ class Document(Base):
     title = Column(String(200), nullable=False)
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
     document_type = Column(String(100), nullable=True)
     page_count = Column(Integer, nullable=True)
     processing_status = Column(
@@ -119,16 +125,25 @@ class Document(Base):
         nullable=False,
         default="uploaded",
     )
+    sector_id = Column(
+        Integer,
+        ForeignKey("sectors.id"),
+        nullable=False,
+    )
     equipment_id = Column(
         Integer,
         ForeignKey("equipments.id"),
-        nullable=False,
+        nullable=True,
     )
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
     )
 
+    sector = relationship(
+        "Sector",
+        back_populates="documents",
+    )
     equipment = relationship(
         "Equipment",
         back_populates="documents",
