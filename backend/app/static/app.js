@@ -993,7 +993,7 @@ function buildFallbackPageImageUrl(result) {
     const pageId = getResultPageId(result);
     const pageNumber = getResultPageNumber(result);
 
-    if (pageId) return `/pages/${pageId}/image`;
+    if (pageId) return `${API.documents}/pages/${pageId}/image`;
 
     if (documentId && pageNumber) {
         return `/documents/${documentId}/pages/${pageNumber}/image`;
@@ -1755,6 +1755,12 @@ function renderDocuments(documents) {
                             target="_blank"
                             rel="noopener"
                         >Ver PDF</a>
+                        ${statusClass(status) === "completed" ? "" : `
+                        <button
+                            class="secondary-button document-process-button"
+                            type="button"
+                            data-document-id="${escapeHtml(documentItem.id)}"
+                        >Procesar</button>`}
                         <button
                             class="danger-button document-delete-button"
                             type="button"
@@ -1792,6 +1798,23 @@ async function loadDocuments() {
 
 
 async function handleDocumentsListClick(event) {
+    const processButton = event.target.closest(".document-process-button");
+    if (processButton) {
+        processButton.disabled = true;
+        processButton.textContent = "Procesando...";
+        try {
+            const documentId = processButton.dataset.documentId;
+            const response = await apiRequest(`${API.documents}/${documentId}/process`, { method: "POST" });
+            showMessage(elements.documentsMessage, response?.message || "Documento procesado correctamente.", "success");
+            await loadDocuments();
+        } catch (error) {
+            showMessage(elements.documentsMessage, `No se pudo procesar: ${error.message}`, "error");
+            processButton.disabled = false;
+            processButton.textContent = "Procesar";
+        }
+        return;
+    }
+
     const button = event.target.closest(".document-delete-button");
     if (!button) return;
 

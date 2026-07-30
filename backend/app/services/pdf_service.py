@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from app import models
 
 
-PAGE_IMAGE_DIR = Path("uploads/pages")
+BASE_DIR = Path(__file__).resolve().parents[2]
+PAGE_IMAGE_DIR = BASE_DIR / "uploads" / "pages"
 PAGE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Escala usada para generar la imagen PNG.

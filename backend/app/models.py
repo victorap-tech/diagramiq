@@ -212,6 +212,17 @@ class ComponentReference(Base):
         nullable=True,
     )
 
+    normalized_reference = Column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
+    x = Column(Integer, nullable=True)
+    y = Column(Integer, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+
     document_page_id = Column(
         Integer,
         ForeignKey("document_pages.id"),

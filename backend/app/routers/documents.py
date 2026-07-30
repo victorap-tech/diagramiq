@@ -5,6 +5,7 @@ from uuid import uuid4
 import fitz
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -17,7 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.services.pdf_service import process_pdf_document
 
 
@@ -30,6 +31,19 @@ router = APIRouter(
 BASE_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BASE_DIR / "uploads" / "documents"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def process_document_in_background(document_id: int) -> None:
+    """Indexa el PDF después de responder la carga."""
+    db = SessionLocal()
+    try:
+        document = db.query(models.Document).filter(models.Document.id == document_id).first()
+        if document is not None:
+            process_pdf_document(document=document, db=db)
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 def get_or_create_sector(
@@ -119,6 +133,7 @@ def get_or_create_sector(
     status_code=status.HTTP_201_CREATED,
 )
 def upload_document(
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
     file: UploadFile = File(...),
 
@@ -229,7 +244,7 @@ def upload_document(
         description=clean_description,
         document_type=clean_document_type,
         page_count=page_count,
-        processing_status="uploaded",
+        processing_status="pending",
         sector_id=sector.id,
         equipment_id=equipment.id if equipment else None,
     )
@@ -249,6 +264,8 @@ def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"No se pudo guardar el documento: {str(exc)}",
         )
+
+    background_tasks.add_task(process_document_in_background, new_document.id)
 
     return new_document
 
@@ -391,6 +408,35 @@ def get_document_page(
         )
 
     return page
+
+
+@router.get("/{document_id}/pages/{page_number}/image", include_in_schema=False)
+def get_document_page_image(
+    document_id: int,
+    page_number: int,
+    db: Session = Depends(get_db),
+):
+    page = db.query(models.DocumentPage).filter(
+        models.DocumentPage.document_id == document_id,
+        models.DocumentPage.page_number == page_number,
+    ).first()
+    if page is None or not page.image_path:
+        raise HTTPException(status_code=404, detail="Imagen de página no encontrada")
+    image_path = Path(page.image_path)
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="La imagen ya no existe")
+    return FileResponse(image_path, media_type="image/png")
+
+
+@router.get("/pages/{page_id}/image", include_in_schema=False)
+def get_page_image_by_id(page_id: int, db: Session = Depends(get_db)):
+    page = db.query(models.DocumentPage).filter(models.DocumentPage.id == page_id).first()
+    if page is None or not page.image_path:
+        raise HTTPException(status_code=404, detail="Imagen de página no encontrada")
+    image_path = Path(page.image_path)
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="La imagen ya no existe")
+    return FileResponse(image_path, media_type="image/png")
 
 
 

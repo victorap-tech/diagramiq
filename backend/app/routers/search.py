@@ -136,7 +136,7 @@ def serialize_reference_result(
         "page_id": page.id,
         "page_number": page.page_number,
         "page": page.page_number,
-        "image_path": page.image_path,
+        "image_path": f"/documents/{document.id}/pages/{page.page_number}/image",
         "fragment": build_fragment(
             text=page.text_content,
             query=query,
@@ -385,7 +385,7 @@ def search_documents(
                     "page_id": page.id,
                     "page_number": page.page_number,
                     "page": page.page_number,
-                    "image_path": page.image_path,
+                    "image_path": f"/documents/{document.id}/pages/{page.page_number}/image",
                     "fragment": build_fragment(
                         text=page.text_content,
                         query=clean_query,

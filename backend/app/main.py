@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import inspect, text
+
 from app.database import Base, engine
 from app.routers import (
     documents,
@@ -18,10 +20,32 @@ from app.routers import (
 # Crear tablas solo si no existen
 Base.metadata.create_all(bind=engine)
 
+
+def ensure_reference_columns() -> None:
+    """Agrega columnas nuevas cuando se reutiliza una base de versiones anteriores."""
+    inspector = inspect(engine)
+    if "component_references" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("component_references")}
+    definitions = {
+        "normalized_reference": "VARCHAR(100)",
+        "x": "INTEGER",
+        "y": "INTEGER",
+        "width": "INTEGER",
+        "height": "INTEGER",
+    }
+    with engine.begin() as connection:
+        for name, definition in definitions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE component_references ADD COLUMN {name} {definition}"))
+
+
+ensure_reference_columns()
+
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.4.0",
+    version="0.6.0",
 )
 
 # Ruta absoluta de la carpeta app
