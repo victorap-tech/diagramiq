@@ -51,6 +51,7 @@ const elements = {
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
+    newPlantName: document.getElementById("newPlantName"),
     uploadSector: document.getElementById("uploadSector"),
     newSectorName: document.getElementById("newSectorName"),
     uploadForm: document.getElementById("uploadForm"),
@@ -770,7 +771,22 @@ function initializeHierarchyEvents() {
 
     elements.uploadPlant?.addEventListener("change", async (event) => {
         hideMessage(elements.uploadMessage);
+
+        if (event.target.value && elements.newPlantName) {
+            elements.newPlantName.value = "";
+        }
+
         await loadUploadSectors(event.target.value);
+    });
+
+    elements.newPlantName?.addEventListener("input", (event) => {
+        if (event.target.value.trim() && elements.uploadPlant) {
+            elements.uploadPlant.value = "";
+            state.upload.plantId = null;
+            resetSelect(elements.uploadSector, "El sector se creará en la planta nueva");
+        } else if (elements.uploadOrganization?.value) {
+            resetSelect(elements.uploadSector, "Seleccionar sector");
+        }
     });
 
     elements.uploadSector?.addEventListener("change", (event) => {
@@ -1449,6 +1465,38 @@ function updateUploadProgress(percent, text) {
 }
 
 
+async function createPlantIfNeeded(organizationId, plantName) {
+    const trimmedName = plantName.trim();
+
+    if (!trimmedName) return null;
+
+    if (!organizationId) {
+        throw new Error("Seleccioná una empresa antes de crear la planta.");
+    }
+
+    const existingPlants = await fetchPlantsByOrganization(organizationId);
+    const existing = existingPlants.find(
+        (plant) =>
+            getObjectName(plant).trim().toLowerCase() ===
+            trimmedName.toLowerCase()
+    );
+
+    if (existing) {
+        return getObjectId(existing);
+    }
+
+    const response = await apiRequest(API.plants, {
+        method: "POST",
+        body: {
+            name: trimmedName,
+            organization_id: normalizeId(organizationId),
+        },
+    });
+
+    return getObjectId(response);
+}
+
+
 async function createSectorIfNeeded(plantId, sectorName) {
     const trimmedName = sectorName.trim();
 
@@ -1499,14 +1547,20 @@ async function handleUploadSubmit(event) {
     event.preventDefault();
     hideMessage(elements.uploadMessage);
 
-    const plantId = elements.uploadPlant?.value;
+    const organizationId = elements.uploadOrganization?.value;
+    let plantId = elements.uploadPlant?.value;
+    const newPlantName = elements.newPlantName?.value.trim() ?? "";
     let sectorId = elements.uploadSector?.value;
     const newSectorName = elements.newSectorName?.value.trim() ?? "";
     const file = elements.pdfFile?.files?.[0];
 
     try {
-        if (!plantId) {
-            throw new Error("Seleccioná una planta.");
+        if (!organizationId) {
+            throw new Error("Seleccioná una empresa.");
+        }
+
+        if (!plantId && !newPlantName) {
+            throw new Error("Seleccioná una planta existente o escribí una nueva.");
         }
 
         if (!sectorId && !newSectorName) {
@@ -1516,10 +1570,19 @@ async function handleUploadSubmit(event) {
         validatePdfFile(file);
 
         setUploadLoading(true);
-        updateUploadProgress(15, "Preparando documento...");
+        updateUploadProgress(10, "Preparando documento...");
+
+        if (!plantId && newPlantName) {
+            updateUploadProgress(20, "Creando planta...");
+            plantId = await createPlantIfNeeded(organizationId, newPlantName);
+        }
+
+        if (!plantId) {
+            throw new Error("No se pudo obtener la planta.");
+        }
 
         if (!sectorId && newSectorName) {
-            updateUploadProgress(30, "Creando sector...");
+            updateUploadProgress(35, "Creando sector...");
             sectorId = await createSectorIfNeeded(plantId, newSectorName);
         }
 

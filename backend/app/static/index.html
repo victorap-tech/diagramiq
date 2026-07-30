@@ -297,7 +297,7 @@
                     </h2>
 
                     <p>
-                        Asociá el archivo a una planta y a un sector.
+                        Elegí una planta existente o creá una nueva y asociá el plano a un sector.
                         El equipo es opcional.
                     </p>
                 </div>
@@ -325,18 +325,33 @@
 
                     <div class="form-group">
                         <label for="uploadPlant">
-                            Planta
+                            Planta existente
                         </label>
 
                         <select
                             id="uploadPlant"
-                            required
                             disabled
                         >
                             <option value="">
                                 Seleccionar planta
                             </option>
                         </select>
+
+                        <small>
+                            Podés elegir una existente o crear una nueva.
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newPlantName">
+                            Nueva planta
+                        </label>
+
+                        <input
+                            id="newPlantName"
+                            type="text"
+                            placeholder="Ejemplo: Planta de biomasa"
+                        >
                     </div>
 
                     <div class="form-group">
@@ -606,7 +621,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.4.0</span>
+        <span>DiagramIQ v0.6.1</span>
 
         <a
             href="/docs"
