@@ -1,0 +1,1635 @@
+/* =========================================================
+   DiagramIQ Frontend
+   app/static/app.js
+   ========================================================= */
+
+"use strict";
+
+/* =========================================================
+   CONFIGURACIÓN
+   ========================================================= */
+
+const API = {
+    health: "/",
+    organizations: "/organizations",
+    plants: "/plants",
+    sectors: "/sectors",
+    documents: "/documents",
+    search: "/search",
+};
+
+
+/* =========================================================
+   REFERENCIAS A ELEMENTOS HTML
+   ========================================================= */
+
+const elements = {
+    statusIndicator: document.getElementById("statusIndicator"),
+    statusText: document.getElementById("statusText"),
+
+    navButtons: document.querySelectorAll(".nav-button"),
+    appSections: document.querySelectorAll(".app-section"),
+
+    searchOrganization: document.getElementById("searchOrganization"),
+    searchPlant: document.getElementById("searchPlant"),
+    searchSector: document.getElementById("searchSector"),
+    searchForm: document.getElementById("searchForm"),
+    searchInput: document.getElementById("searchInput"),
+    searchButton: document.getElementById("searchButton"),
+    detectedReferences: document.getElementById("detectedReferences"),
+    searchMessage: document.getElementById("searchMessage"),
+    searchLoading: document.getElementById("searchLoading"),
+    searchResults: document.getElementById("searchResults"),
+
+    uploadOrganization: document.getElementById("uploadOrganization"),
+    uploadPlant: document.getElementById("uploadPlant"),
+    uploadSector: document.getElementById("uploadSector"),
+    newSectorName: document.getElementById("newSectorName"),
+    uploadForm: document.getElementById("uploadForm"),
+    documentTitle: document.getElementById("documentTitle"),
+    documentDescription: document.getElementById("documentDescription"),
+    documentType: document.getElementById("documentType"),
+    equipmentId: document.getElementById("equipmentId"),
+    pdfFile: document.getElementById("pdfFile"),
+    fileDropArea: document.getElementById("fileDropArea"),
+    selectedFileName: document.getElementById("selectedFileName"),
+    uploadButton: document.getElementById("uploadButton"),
+    uploadProgress: document.getElementById("uploadProgress"),
+    uploadProgressBar: document.getElementById("uploadProgressBar"),
+    uploadProgressText: document.getElementById("uploadProgressText"),
+    uploadMessage: document.getElementById("uploadMessage"),
+
+    refreshDocumentsButton: document.getElementById("refreshDocumentsButton"),
+    documentsMessage: document.getElementById("documentsMessage"),
+    documentsLoading: document.getElementById("documentsLoading"),
+    documentsList: document.getElementById("documentsList"),
+
+    viewerModal: document.getElementById("viewerModal"),
+    viewerTitle: document.getElementById("viewerTitle"),
+    viewerSubtitle: document.getElementById("viewerSubtitle"),
+    viewerCanvas: document.getElementById("viewerCanvas"),
+    viewerImage: document.getElementById("viewerImage"),
+    referenceHighlight: document.getElementById("referenceHighlight"),
+    closeViewerButton: document.getElementById("closeViewerButton"),
+    modalOverlay: document.querySelector(".modal-overlay"),
+};
+
+
+/* =========================================================
+   ESTADO INTERNO
+   ========================================================= */
+
+const state = {
+    organizations: [],
+    plants: [],
+    sectors: [],
+    documents: [],
+
+    search: {
+        organizationId: null,
+        plantId: null,
+        sectorId: null,
+        results: [],
+    },
+
+    upload: {
+        organizationId: null,
+        plantId: null,
+        sectorId: null,
+    },
+
+    viewer: {
+        result: null,
+        coordinates: null,
+        scale: 1,
+    },
+};
+
+
+/* =========================================================
+   FUNCIONES GENERALES
+   ========================================================= */
+
+function toArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value && Array.isArray(value.items)) return value.items;
+    if (value && Array.isArray(value.results)) return value.results;
+    if (value && Array.isArray(value.data)) return value.data;
+    return [];
+}
+
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+
+function normalizeId(value) {
+    if (value === null || value === undefined || value === "") return null;
+
+    const numberValue = Number(value);
+    return Number.isNaN(numberValue) ? value : numberValue;
+}
+
+
+function getObjectId(item) {
+    return (
+        item?.id ??
+        item?.organization_id ??
+        item?.plant_id ??
+        item?.sector_id ??
+        item?.document_id ??
+        null
+    );
+}
+
+
+function getObjectName(item) {
+    return (
+        item?.name ??
+        item?.title ??
+        item?.description ??
+        `Elemento ${getObjectId(item) ?? ""}`
+    );
+}
+
+
+function buildQuery(params = {}) {
+    const searchParams = new URLSearchParams();
+
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== "") {
+            searchParams.append(key, value);
+        }
+    });
+
+    const queryString = searchParams.toString();
+    return queryString ? `?${queryString}` : "";
+}
+
+
+async function apiRequest(url, options = {}) {
+    const config = {
+        method: options.method || "GET",
+        headers: {
+            Accept: "application/json",
+            ...(options.headers || {}),
+        },
+        body: options.body,
+    };
+
+    if (
+        config.body &&
+        !(config.body instanceof FormData) &&
+        typeof config.body !== "string"
+    ) {
+        config.headers["Content-Type"] = "application/json";
+        config.body = JSON.stringify(config.body);
+    }
+
+    let response;
+
+    try {
+        response = await fetch(url, config);
+    } catch {
+        throw new Error("No se pudo conectar con el servidor.");
+    }
+
+    let responseData = null;
+    const contentType = response.headers.get("content-type") || "";
+
+    try {
+        responseData = contentType.includes("application/json")
+            ? await response.json()
+            : await response.text();
+    } catch {
+        responseData = null;
+    }
+
+    if (!response.ok) {
+        let detail =
+            responseData?.detail ??
+            responseData?.message ??
+            responseData?.error ??
+            null;
+
+        if (Array.isArray(detail)) {
+            detail = detail
+                .map((item) => item?.msg || JSON.stringify(item))
+                .join(". ");
+        }
+
+        if (!detail && typeof responseData === "string") {
+            detail = responseData;
+        }
+
+        throw new Error(detail || `Error del servidor: ${response.status}`);
+    }
+
+    return responseData;
+}
+
+
+/* =========================================================
+   MENSAJES
+   ========================================================= */
+
+function showMessage(element, text, type = "info") {
+    if (!element) return;
+
+    element.textContent = text;
+    element.classList.remove("hidden", "success", "error", "info");
+    element.classList.add(type);
+}
+
+
+function hideMessage(element) {
+    if (!element) return;
+
+    element.textContent = "";
+    element.classList.add("hidden");
+    element.classList.remove("success", "error", "info");
+}
+
+
+/* =========================================================
+   SELECTORES
+   ========================================================= */
+
+function resetSelect(selectElement, placeholder, disabled = true) {
+    if (!selectElement) return;
+
+    selectElement.innerHTML = `
+        <option value="">${escapeHtml(placeholder)}</option>
+    `;
+    selectElement.value = "";
+    selectElement.disabled = disabled;
+}
+
+
+function fillSelect(selectElement, items, placeholder, selectedValue = "") {
+    if (!selectElement) return;
+
+    const options = items
+        .map((item) => {
+            const id = getObjectId(item);
+            const name = getObjectName(item);
+
+            return `
+                <option value="${escapeHtml(id)}">
+                    ${escapeHtml(name)}
+                </option>
+            `;
+        })
+        .join("");
+
+    selectElement.innerHTML = `
+        <option value="">${escapeHtml(placeholder)}</option>
+        ${options}
+    `;
+
+    selectElement.disabled = false;
+
+    if (selectedValue !== null && selectedValue !== undefined) {
+        selectElement.value = String(selectedValue);
+    }
+}
+
+
+/* =========================================================
+   NAVEGACIÓN
+   ========================================================= */
+
+function activateSection(sectionId) {
+    elements.navButtons.forEach((button) => {
+        button.classList.toggle(
+            "active",
+            button.dataset.section === sectionId
+        );
+    });
+
+    elements.appSections.forEach((section) => {
+        section.classList.toggle("active", section.id === sectionId);
+    });
+
+    if (sectionId === "documentsSection") {
+        loadDocuments();
+    }
+}
+
+
+function initializeNavigation() {
+    elements.navButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            activateSection(button.dataset.section);
+        });
+    });
+}
+
+
+/* =========================================================
+   ESTADO DE LA API
+   ========================================================= */
+
+function setApiStatus(isOnline, text) {
+    elements.statusIndicator?.classList.remove("online", "offline");
+    elements.statusIndicator?.classList.add(isOnline ? "online" : "offline");
+
+    if (elements.statusText) {
+        elements.statusText.textContent = text;
+    }
+}
+
+
+async function checkApiStatus() {
+    try {
+        await apiRequest(API.health);
+        setApiStatus(true, "Servidor conectado");
+    } catch {
+        try {
+            await apiRequest(API.organizations);
+            setApiStatus(true, "Servidor conectado");
+        } catch {
+            setApiStatus(false, "Servidor sin conexión");
+        }
+    }
+}
+
+
+/* =========================================================
+   ORGANIZACIONES, PLANTAS Y SECTORES
+   ========================================================= */
+
+async function loadOrganizations() {
+    try {
+        const response = await apiRequest(API.organizations);
+        state.organizations = toArray(response);
+
+        fillSelect(
+            elements.searchOrganization,
+            state.organizations,
+            "Seleccionar empresa"
+        );
+
+        fillSelect(
+            elements.uploadOrganization,
+            state.organizations,
+            "Seleccionar empresa"
+        );
+
+        resetSelect(elements.searchPlant, "Seleccionar planta");
+        resetSelect(elements.searchSector, "Seleccionar sector");
+        resetSelect(elements.uploadPlant, "Seleccionar planta");
+        resetSelect(elements.uploadSector, "Seleccionar sector");
+    } catch (error) {
+        console.error("Error cargando organizaciones:", error);
+
+        showMessage(
+            elements.searchMessage,
+            `No se pudieron cargar las empresas: ${error.message}`,
+            "error"
+        );
+
+        showMessage(
+            elements.uploadMessage,
+            `No se pudieron cargar las empresas: ${error.message}`,
+            "error"
+        );
+    }
+}
+
+
+async function fetchPlantsByOrganization(organizationId) {
+    if (!organizationId) return [];
+
+    const response = await apiRequest(
+        `${API.plants}${buildQuery({ organization_id: organizationId })}`
+    );
+
+    return toArray(response).filter((plant) => {
+        const plantOrganizationId =
+            plant.organization_id ??
+            plant.organization?.id ??
+            null;
+
+        return (
+            plantOrganizationId === null ||
+            String(plantOrganizationId) === String(organizationId)
+        );
+    });
+}
+
+
+async function fetchSectorsByPlant(plantId) {
+    if (!plantId) return [];
+
+    const response = await apiRequest(
+        `${API.sectors}${buildQuery({ plant_id: plantId })}`
+    );
+
+    return toArray(response).filter((sector) => {
+        const sectorPlantId =
+            sector.plant_id ??
+            sector.plant?.id ??
+            null;
+
+        return (
+            sectorPlantId === null ||
+            String(sectorPlantId) === String(plantId)
+        );
+    });
+}
+
+
+async function loadSearchPlants(organizationId) {
+    resetSelect(elements.searchPlant, "Cargando plantas...");
+    resetSelect(elements.searchSector, "Seleccionar sector");
+
+    state.search.organizationId = normalizeId(organizationId);
+    state.search.plantId = null;
+    state.search.sectorId = null;
+
+    if (!organizationId) {
+        resetSelect(elements.searchPlant, "Seleccionar planta");
+        return;
+    }
+
+    try {
+        const plants = await fetchPlantsByOrganization(organizationId);
+        state.plants = plants;
+
+        fillSelect(
+            elements.searchPlant,
+            plants,
+            plants.length ? "Seleccionar planta" : "No hay plantas"
+        );
+    } catch (error) {
+        resetSelect(elements.searchPlant, "Error al cargar plantas");
+
+        showMessage(
+            elements.searchMessage,
+            `No se pudieron cargar las plantas: ${error.message}`,
+            "error"
+        );
+    }
+}
+
+
+async function loadUploadPlants(organizationId) {
+    resetSelect(elements.uploadPlant, "Cargando plantas...");
+    resetSelect(elements.uploadSector, "Seleccionar sector");
+
+    state.upload.organizationId = normalizeId(organizationId);
+    state.upload.plantId = null;
+    state.upload.sectorId = null;
+
+    if (!organizationId) {
+        resetSelect(elements.uploadPlant, "Seleccionar planta");
+        return;
+    }
+
+    try {
+        const plants = await fetchPlantsByOrganization(organizationId);
+        state.plants = plants;
+
+        fillSelect(
+            elements.uploadPlant,
+            plants,
+            plants.length ? "Seleccionar planta" : "No hay plantas"
+        );
+    } catch (error) {
+        resetSelect(elements.uploadPlant, "Error al cargar plantas");
+
+        showMessage(
+            elements.uploadMessage,
+            `No se pudieron cargar las plantas: ${error.message}`,
+            "error"
+        );
+    }
+}
+
+
+async function loadSearchSectors(plantId) {
+    resetSelect(elements.searchSector, "Cargando sectores...");
+
+    state.search.plantId = normalizeId(plantId);
+    state.search.sectorId = null;
+
+    if (!plantId) {
+        resetSelect(elements.searchSector, "Seleccionar sector");
+        return;
+    }
+
+    try {
+        const sectors = await fetchSectorsByPlant(plantId);
+        state.sectors = sectors;
+
+        fillSelect(
+            elements.searchSector,
+            sectors,
+            sectors.length ? "Seleccionar sector" : "No hay sectores"
+        );
+    } catch (error) {
+        resetSelect(elements.searchSector, "Error al cargar sectores");
+
+        showMessage(
+            elements.searchMessage,
+            `No se pudieron cargar los sectores: ${error.message}`,
+            "error"
+        );
+    }
+}
+
+
+async function loadUploadSectors(plantId) {
+    resetSelect(elements.uploadSector, "Cargando sectores...");
+
+    state.upload.plantId = normalizeId(plantId);
+    state.upload.sectorId = null;
+
+    if (!plantId) {
+        resetSelect(elements.uploadSector, "Seleccionar sector");
+        return;
+    }
+
+    try {
+        const sectors = await fetchSectorsByPlant(plantId);
+        state.sectors = sectors;
+
+        fillSelect(
+            elements.uploadSector,
+            sectors,
+            sectors.length ? "Seleccionar sector" : "No hay sectores"
+        );
+    } catch (error) {
+        resetSelect(elements.uploadSector, "Error al cargar sectores");
+
+        showMessage(
+            elements.uploadMessage,
+            `No se pudieron cargar los sectores: ${error.message}`,
+            "error"
+        );
+    }
+}
+
+
+function initializeHierarchyEvents() {
+    elements.searchOrganization?.addEventListener("change", async (event) => {
+        hideMessage(elements.searchMessage);
+        await loadSearchPlants(event.target.value);
+    });
+
+    elements.searchPlant?.addEventListener("change", async (event) => {
+        hideMessage(elements.searchMessage);
+        await loadSearchSectors(event.target.value);
+    });
+
+    elements.searchSector?.addEventListener("change", (event) => {
+        state.search.sectorId = normalizeId(event.target.value);
+    });
+
+    elements.uploadOrganization?.addEventListener("change", async (event) => {
+        hideMessage(elements.uploadMessage);
+        await loadUploadPlants(event.target.value);
+    });
+
+    elements.uploadPlant?.addEventListener("change", async (event) => {
+        hideMessage(elements.uploadMessage);
+        await loadUploadSectors(event.target.value);
+    });
+
+    elements.uploadSector?.addEventListener("change", (event) => {
+        state.upload.sectorId = normalizeId(event.target.value);
+
+        if (event.target.value && elements.newSectorName) {
+            elements.newSectorName.value = "";
+        }
+    });
+
+    elements.newSectorName?.addEventListener("input", (event) => {
+        if (event.target.value.trim() && elements.uploadSector) {
+            elements.uploadSector.value = "";
+            state.upload.sectorId = null;
+        }
+    });
+}
+
+
+/* =========================================================
+   BÚSQUEDA
+   ========================================================= */
+
+function clearSearchResults() {
+    if (elements.searchResults) {
+        elements.searchResults.innerHTML = "";
+    }
+
+    if (elements.detectedReferences) {
+        elements.detectedReferences.innerHTML = "";
+        elements.detectedReferences.classList.add("hidden");
+    }
+}
+
+
+function setSearchLoading(isLoading) {
+    elements.searchLoading?.classList.toggle("hidden", !isLoading);
+
+    if (elements.searchButton) {
+        elements.searchButton.disabled = isLoading;
+        elements.searchButton.textContent = isLoading
+            ? "Buscando..."
+            : "Buscar";
+    }
+}
+
+
+function getDetectedReferences(response) {
+    const references =
+        response?.detected_references ??
+        response?.references ??
+        response?.detectedReferences ??
+        [];
+
+    if (!Array.isArray(references)) return [];
+
+    return references
+        .map((reference) => {
+            if (typeof reference === "string") return reference;
+
+            return (
+                reference?.reference ??
+                reference?.normalized_reference ??
+                reference?.name ??
+                ""
+            );
+        })
+        .filter(Boolean);
+}
+
+
+function getSearchResults(response) {
+    if (Array.isArray(response)) return response;
+
+    return toArray(
+        response?.results ??
+        response?.items ??
+        response?.data ??
+        []
+    );
+}
+
+
+function renderDetectedReferences(references) {
+    if (!elements.detectedReferences || references.length === 0) {
+        elements.detectedReferences?.classList.add("hidden");
+        return;
+    }
+
+    const uniqueReferences = [
+        ...new Set(references.map((reference) => String(reference).trim())),
+    ];
+
+    elements.detectedReferences.innerHTML = `
+        <strong>Referencias detectadas:</strong>
+        ${uniqueReferences
+            .map(
+                (reference) => `
+                    <span class="reference-chip">
+                        ${escapeHtml(reference)}
+                    </span>
+                `
+            )
+            .join("")}
+    `;
+
+    elements.detectedReferences.classList.remove("hidden");
+}
+
+
+function getResultDocumentTitle(result) {
+    return (
+        result?.document_title ??
+        result?.document?.title ??
+        result?.title ??
+        "Documento sin título"
+    );
+}
+
+
+function getResultPageNumber(result) {
+    return (
+        result?.page_number ??
+        result?.page?.page_number ??
+        result?.page ??
+        result?.number ??
+        null
+    );
+}
+
+
+function getResultReference(result) {
+    return (
+        result?.reference ??
+        result?.normalized_reference ??
+        result?.component_reference ??
+        result?.tag ??
+        ""
+    );
+}
+
+
+function getResultText(result) {
+    return (
+        result?.text_fragment ??
+        result?.fragment ??
+        result?.matched_text ??
+        result?.text ??
+        result?.content ??
+        ""
+    );
+}
+
+
+function getResultImageUrl(result) {
+    return (
+        result?.image_url ??
+        result?.page_image_url ??
+        result?.page?.image_url ??
+        result?.page_image ??
+        result?.image_path ??
+        result?.page?.image_path ??
+        null
+    );
+}
+
+
+function normalizeImageUrl(imageUrl) {
+    if (!imageUrl) return null;
+
+    if (
+        imageUrl.startsWith("http://") ||
+        imageUrl.startsWith("https://") ||
+        imageUrl.startsWith("/")
+    ) {
+        return imageUrl;
+    }
+
+    return `/${imageUrl}`;
+}
+
+
+function getResultCoordinates(result) {
+    const coordinates =
+        result?.coordinates ??
+        result?.bounding_box ??
+        result?.bbox ??
+        {};
+
+    const x = coordinates?.x ?? result?.x ?? null;
+    const y = coordinates?.y ?? result?.y ?? null;
+    const width = coordinates?.width ?? result?.width ?? null;
+    const height = coordinates?.height ?? result?.height ?? null;
+
+    if ([x, y, width, height].some((value) => value === null)) {
+        return null;
+    }
+
+    return {
+        x: Number(x),
+        y: Number(y),
+        width: Number(width),
+        height: Number(height),
+    };
+}
+
+
+function getResultDocumentId(result) {
+    return result?.document_id ?? result?.document?.id ?? null;
+}
+
+
+function getResultPageId(result) {
+    return result?.page_id ?? result?.page?.id ?? null;
+}
+
+
+function buildFallbackPageImageUrl(result) {
+    const documentId = getResultDocumentId(result);
+    const pageId = getResultPageId(result);
+    const pageNumber = getResultPageNumber(result);
+
+    if (pageId) return `/pages/${pageId}/image`;
+
+    if (documentId && pageNumber) {
+        return `/documents/${documentId}/pages/${pageNumber}/image`;
+    }
+
+    return null;
+}
+
+
+function createOpenViewerButton(result, index) {
+    const imageUrl =
+        normalizeImageUrl(getResultImageUrl(result)) ??
+        buildFallbackPageImageUrl(result);
+
+    if (!imageUrl) {
+        return `
+            <button class="secondary-button" type="button" disabled>
+                Sin imagen
+            </button>
+        `;
+    }
+
+    return `
+        <button
+            class="primary-button open-viewer-button"
+            type="button"
+            data-result-index="${index}"
+        >
+            Abrir plano
+        </button>
+    `;
+}
+
+
+function renderSearchResults(results) {
+    if (!elements.searchResults) return;
+
+    if (results.length === 0) {
+        showMessage(
+            elements.searchMessage,
+            "No se encontraron coincidencias en los documentos del sector seleccionado.",
+            "info"
+        );
+
+        elements.searchResults.innerHTML = "";
+        return;
+    }
+
+    elements.searchResults.innerHTML = results
+        .map((result, index) => {
+            const title = getResultDocumentTitle(result);
+            const pageNumber = getResultPageNumber(result);
+            const reference = getResultReference(result);
+            const fragment = getResultText(result);
+
+            return `
+                <article class="result-card">
+                    <div class="result-main">
+                        <h3>${escapeHtml(title)}</h3>
+
+                        <div class="result-meta">
+                            ${
+                                pageNumber !== null
+                                    ? `<span>Página ${escapeHtml(pageNumber)}</span>`
+                                    : ""
+                            }
+
+                            ${
+                                result?.document_type
+                                    ? `<span>${escapeHtml(result.document_type)}</span>`
+                                    : ""
+                            }
+
+                            ${
+                                result?.sector_name
+                                    ? `<span>Sector: ${escapeHtml(result.sector_name)}</span>`
+                                    : ""
+                            }
+                        </div>
+
+                        ${
+                            reference
+                                ? `<span class="result-reference">${escapeHtml(reference)}</span>`
+                                : ""
+                        }
+
+                        ${
+                            fragment
+                                ? `<p class="result-fragment">${escapeHtml(fragment)}</p>`
+                                : ""
+                        }
+                    </div>
+
+                    <div class="result-actions">
+                        ${createOpenViewerButton(result, index)}
+                    </div>
+                </article>
+            `;
+        })
+        .join("");
+
+    state.search.results = results;
+    initializeViewerButtons();
+}
+
+
+async function handleSearchSubmit(event) {
+    event.preventDefault();
+
+    hideMessage(elements.searchMessage);
+    clearSearchResults();
+
+    const query = elements.searchInput?.value.trim() ?? "";
+    const sectorId =
+        elements.searchSector?.value ??
+        state.search.sectorId;
+
+    if (!sectorId) {
+        showMessage(
+            elements.searchMessage,
+            "Seleccioná un sector antes de buscar.",
+            "error"
+        );
+        return;
+    }
+
+    if (query.length < 2) {
+        showMessage(
+            elements.searchMessage,
+            "Ingresá una referencia, TAG o texto de alarma.",
+            "error"
+        );
+        return;
+    }
+
+    state.search.sectorId = normalizeId(sectorId);
+    setSearchLoading(true);
+
+    try {
+        const response = await apiRequest(
+            `${API.search}${buildQuery({
+                q: query,
+                sector_id: sectorId,
+            })}`
+        );
+
+        const references = getDetectedReferences(response);
+        const results = getSearchResults(response);
+
+        renderDetectedReferences(references);
+        renderSearchResults(results);
+
+        if (results.length > 0) {
+            showMessage(
+                elements.searchMessage,
+                `Se encontraron ${results.length} coincidencia${
+                    results.length === 1 ? "" : "s"
+                }.`,
+                "success"
+            );
+        }
+    } catch (error) {
+        console.error("Error en búsqueda:", error);
+
+        showMessage(
+            elements.searchMessage,
+            `No se pudo realizar la búsqueda: ${error.message}`,
+            "error"
+        );
+    } finally {
+        setSearchLoading(false);
+    }
+}
+
+
+function initializeSearchEvents() {
+    elements.searchForm?.addEventListener("submit", handleSearchSubmit);
+}
+
+
+/* =========================================================
+   VISOR DE PLANOS Y ZOOM
+   ========================================================= */
+
+function getViewerResultByIndex(index) {
+    return state.search.results[index] ?? null;
+}
+
+
+function hideReferenceHighlight() {
+    if (!elements.referenceHighlight) return;
+
+    elements.referenceHighlight.classList.add("hidden");
+    elements.referenceHighlight.style.left = "0px";
+    elements.referenceHighlight.style.top = "0px";
+    elements.referenceHighlight.style.width = "0px";
+    elements.referenceHighlight.style.height = "0px";
+}
+
+
+function positionReferenceHighlight(coordinates) {
+    if (
+        !coordinates ||
+        !elements.referenceHighlight ||
+        !elements.viewerImage?.naturalWidth ||
+        !elements.viewerImage?.naturalHeight
+    ) {
+        hideReferenceHighlight();
+        return;
+    }
+
+    const scale = state.viewer.scale;
+
+    elements.referenceHighlight.style.left =
+        `${coordinates.x * scale}px`;
+    elements.referenceHighlight.style.top =
+        `${coordinates.y * scale}px`;
+    elements.referenceHighlight.style.width =
+        `${Math.max(coordinates.width * scale, 18)}px`;
+    elements.referenceHighlight.style.height =
+        `${Math.max(coordinates.height * scale, 18)}px`;
+
+    elements.referenceHighlight.classList.remove("hidden");
+}
+
+
+function resetViewerZoom() {
+    state.viewer.scale = 1;
+
+    if (elements.viewerImage) {
+        elements.viewerImage.style.transform = "scale(1)";
+        elements.viewerImage.style.transformOrigin = "top left";
+    }
+
+    const wrapper = elements.viewerImage?.parentElement;
+
+    if (wrapper) {
+        wrapper.style.width = "";
+        wrapper.style.height = "";
+    }
+}
+
+
+function applyViewerZoom() {
+    const image = elements.viewerImage;
+    if (!image?.naturalWidth || !image?.naturalHeight) return;
+
+    image.style.transformOrigin = "top left";
+    image.style.transform = `scale(${state.viewer.scale})`;
+
+    const wrapper = image.parentElement;
+
+    if (wrapper) {
+        wrapper.style.width =
+            `${image.naturalWidth * state.viewer.scale}px`;
+        wrapper.style.height =
+            `${image.naturalHeight * state.viewer.scale}px`;
+    }
+
+    positionReferenceHighlight(state.viewer.coordinates);
+}
+
+
+function scrollHighlightIntoView() {
+    if (
+        !elements.referenceHighlight ||
+        elements.referenceHighlight.classList.contains("hidden")
+    ) {
+        return;
+    }
+
+    setTimeout(() => {
+        elements.referenceHighlight.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+            inline: "center",
+        });
+    }, 120);
+}
+
+
+function openViewer(result) {
+    if (!result || !elements.viewerModal) return;
+
+    const imageUrl =
+        normalizeImageUrl(getResultImageUrl(result)) ??
+        buildFallbackPageImageUrl(result);
+
+    if (!imageUrl) {
+        showMessage(
+            elements.searchMessage,
+            "No se encontró una imagen disponible para esta página.",
+            "error"
+        );
+        return;
+    }
+
+    resetViewerZoom();
+
+    state.viewer.result = result;
+    state.viewer.coordinates = getResultCoordinates(result);
+
+    const documentTitle = getResultDocumentTitle(result);
+    const pageNumber = getResultPageNumber(result);
+    const reference = getResultReference(result);
+
+    if (elements.viewerTitle) {
+        elements.viewerTitle.textContent = documentTitle;
+    }
+
+    if (elements.viewerSubtitle) {
+        const subtitle = [];
+
+        if (pageNumber !== null) subtitle.push(`Página ${pageNumber}`);
+        if (reference) subtitle.push(`Referencia ${reference}`);
+
+        elements.viewerSubtitle.textContent = subtitle.join(" · ");
+    }
+
+    hideReferenceHighlight();
+
+    elements.viewerModal.classList.remove("hidden");
+    elements.viewerModal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+
+    if (elements.viewerCanvas) {
+        elements.viewerCanvas.scrollTop = 0;
+        elements.viewerCanvas.scrollLeft = 0;
+    }
+
+    elements.viewerImage.style.opacity = "0.45";
+
+    elements.viewerImage.onload = () => {
+        elements.viewerImage.style.opacity = "1";
+        applyViewerZoom();
+        scrollHighlightIntoView();
+    };
+
+    elements.viewerImage.onerror = () => {
+        closeViewer();
+
+        showMessage(
+            elements.searchMessage,
+            "No se pudo cargar la imagen de la página.",
+            "error"
+        );
+    };
+
+    elements.viewerImage.src = imageUrl;
+    elements.viewerImage.alt =
+        `${documentTitle} - Página ${pageNumber ?? ""}`;
+}
+
+
+function closeViewer() {
+    if (!elements.viewerModal) return;
+
+    elements.viewerModal.classList.add("hidden");
+    elements.viewerModal.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = "";
+
+    if (elements.viewerImage) {
+        elements.viewerImage.onload = null;
+        elements.viewerImage.onerror = null;
+        elements.viewerImage.src = "";
+    }
+
+    hideReferenceHighlight();
+
+    state.viewer.result = null;
+    state.viewer.coordinates = null;
+    resetViewerZoom();
+}
+
+
+function initializeViewerButtons() {
+    document
+        .querySelectorAll(".open-viewer-button")
+        .forEach((button) => {
+            button.addEventListener("click", () => {
+                const result = getViewerResultByIndex(
+                    Number(button.dataset.resultIndex)
+                );
+
+                openViewer(result);
+            });
+        });
+}
+
+
+function initializeViewerEvents() {
+    elements.closeViewerButton?.addEventListener("click", closeViewer);
+    elements.modalOverlay?.addEventListener("click", closeViewer);
+
+    document.addEventListener("keydown", (event) => {
+        if (
+            event.key === "Escape" &&
+            !elements.viewerModal?.classList.contains("hidden")
+        ) {
+            closeViewer();
+        }
+    });
+
+    elements.viewerCanvas?.addEventListener(
+        "wheel",
+        (event) => {
+            if (!event.ctrlKey) return;
+
+            event.preventDefault();
+
+            const step = 0.15;
+
+            state.viewer.scale =
+                event.deltaY < 0
+                    ? Math.min(3, state.viewer.scale + step)
+                    : Math.max(0.5, state.viewer.scale - step);
+
+            applyViewerZoom();
+        },
+        { passive: false }
+    );
+}
+
+
+/* =========================================================
+   CARGA DE DOCUMENTOS
+   ========================================================= */
+
+function setUploadLoading(isLoading) {
+    if (elements.uploadButton) {
+        elements.uploadButton.disabled = isLoading;
+        elements.uploadButton.textContent = isLoading
+            ? "Cargando..."
+            : "Cargar documento";
+    }
+
+    elements.uploadProgress?.classList.toggle("hidden", !isLoading);
+
+    if (!isLoading && elements.uploadProgressBar) {
+        elements.uploadProgressBar.style.width = "0%";
+    }
+}
+
+
+function updateUploadProgress(percent, text) {
+    if (elements.uploadProgressBar) {
+        elements.uploadProgressBar.style.width = `${percent}%`;
+    }
+
+    if (elements.uploadProgressText) {
+        elements.uploadProgressText.textContent = text;
+    }
+}
+
+
+async function createSectorIfNeeded(plantId, sectorName) {
+    const trimmedName = sectorName.trim();
+
+    if (!trimmedName) return null;
+
+    const existingSectors = await fetchSectorsByPlant(plantId);
+
+    const existing = existingSectors.find(
+        (sector) =>
+            getObjectName(sector).trim().toLowerCase() ===
+            trimmedName.toLowerCase()
+    );
+
+    if (existing) {
+        return getObjectId(existing);
+    }
+
+    const response = await apiRequest(API.sectors, {
+        method: "POST",
+        body: {
+            name: trimmedName,
+            plant_id: normalizeId(plantId),
+        },
+    });
+
+    return getObjectId(response);
+}
+
+
+function validatePdfFile(file) {
+    if (!file) {
+        throw new Error("Seleccioná un archivo PDF.");
+    }
+
+    const isPdf =
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf");
+
+    if (!isPdf) {
+        throw new Error("El archivo seleccionado debe ser PDF.");
+    }
+
+    return true;
+}
+
+
+async function handleUploadSubmit(event) {
+    event.preventDefault();
+    hideMessage(elements.uploadMessage);
+
+    const plantId = elements.uploadPlant?.value;
+    let sectorId = elements.uploadSector?.value;
+    const newSectorName = elements.newSectorName?.value.trim() ?? "";
+    const file = elements.pdfFile?.files?.[0];
+
+    try {
+        if (!plantId) {
+            throw new Error("Seleccioná una planta.");
+        }
+
+        if (!sectorId && !newSectorName) {
+            throw new Error("Seleccioná un sector o escribí uno nuevo.");
+        }
+
+        validatePdfFile(file);
+
+        setUploadLoading(true);
+        updateUploadProgress(15, "Preparando documento...");
+
+        if (!sectorId && newSectorName) {
+            updateUploadProgress(30, "Creando sector...");
+            sectorId = await createSectorIfNeeded(plantId, newSectorName);
+        }
+
+        if (!sectorId) {
+            throw new Error("No se pudo obtener el sector.");
+        }
+
+        const formData = new FormData();
+
+        formData.append("file", file);
+        formData.append(
+            "title",
+            elements.documentTitle?.value.trim() || file.name
+        );
+        formData.append(
+            "description",
+            elements.documentDescription?.value.trim() || ""
+        );
+        formData.append(
+            "document_type",
+            elements.documentType?.value || "plano_electrico"
+        );
+        formData.append("sector_id", sectorId);
+
+        const equipmentId = elements.equipmentId?.value;
+
+        if (equipmentId) {
+            formData.append("equipment_id", equipmentId);
+        }
+
+        updateUploadProgress(55, "Subiendo archivo...");
+
+        const response = await apiRequest(`${API.documents}/upload`, {
+            method: "POST",
+            body: formData,
+        });
+
+        updateUploadProgress(100, "Documento cargado.");
+
+        showMessage(
+            elements.uploadMessage,
+            response?.message ||
+                "Documento cargado correctamente. El procesamiento puede demorar unos minutos.",
+            "success"
+        );
+
+        elements.uploadForm?.reset();
+
+        if (elements.selectedFileName) {
+            elements.selectedFileName.textContent =
+                "Ningún archivo seleccionado";
+        }
+
+        state.upload.sectorId = null;
+
+        resetSelect(elements.uploadPlant, "Seleccionar planta");
+        resetSelect(elements.uploadSector, "Seleccionar sector");
+
+        await loadOrganizations();
+    } catch (error) {
+        console.error("Error al cargar documento:", error);
+
+        showMessage(
+            elements.uploadMessage,
+            `No se pudo cargar el documento: ${error.message}`,
+            "error"
+        );
+    } finally {
+        setTimeout(() => setUploadLoading(false), 500);
+    }
+}
+
+
+function initializeFileEvents() {
+    elements.pdfFile?.addEventListener("change", () => {
+        const file = elements.pdfFile.files?.[0];
+
+        if (elements.selectedFileName) {
+            elements.selectedFileName.textContent =
+                file?.name || "Ningún archivo seleccionado";
+        }
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+        elements.fileDropArea?.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            elements.fileDropArea.classList.add("dragging");
+        });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+        elements.fileDropArea?.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            elements.fileDropArea.classList.remove("dragging");
+        });
+    });
+
+    elements.fileDropArea?.addEventListener("drop", (event) => {
+        const files = event.dataTransfer?.files;
+
+        if (!files?.length || !elements.pdfFile) return;
+
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(files[0]);
+        elements.pdfFile.files = dataTransfer.files;
+
+        if (elements.selectedFileName) {
+            elements.selectedFileName.textContent = files[0].name;
+        }
+    });
+
+    elements.uploadForm?.addEventListener("submit", handleUploadSubmit);
+}
+
+
+/* =========================================================
+   LISTADO DE DOCUMENTOS
+   ========================================================= */
+
+function getDocumentStatus(documentItem) {
+    return (
+        documentItem?.processing_status ??
+        documentItem?.status ??
+        "uploaded"
+    );
+}
+
+
+function translateStatus(status) {
+    const normalized = String(status).toLowerCase();
+
+    const labels = {
+        uploaded: "Cargado",
+        pending: "Pendiente",
+        processing: "Procesando",
+        completed: "Procesado",
+        processed: "Procesado",
+        error: "Error",
+        failed: "Error",
+    };
+
+    return labels[normalized] || status;
+}
+
+
+function statusClass(status) {
+    const normalized = String(status).toLowerCase();
+
+    if (["completed", "processed"].includes(normalized)) return "completed";
+    if (["processing", "pending"].includes(normalized)) return "processing";
+    if (["error", "failed"].includes(normalized)) return "error";
+
+    return "uploaded";
+}
+
+
+function renderDocuments(documents) {
+    if (!elements.documentsList) return;
+
+    if (documents.length === 0) {
+        elements.documentsList.innerHTML = "";
+
+        showMessage(
+            elements.documentsMessage,
+            "Todavía no hay documentos cargados.",
+            "info"
+        );
+        return;
+    }
+
+    hideMessage(elements.documentsMessage);
+
+    elements.documentsList.innerHTML = documents
+        .map((documentItem) => {
+            const status = getDocumentStatus(documentItem);
+            const title =
+                documentItem?.title ??
+                documentItem?.filename ??
+                "Documento sin título";
+
+            const sectorName =
+                documentItem?.sector_name ??
+                documentItem?.sector?.name ??
+                null;
+
+            const pages =
+                documentItem?.page_count ??
+                documentItem?.pages_count ??
+                null;
+
+            return `
+                <article class="document-card">
+                    <div>
+                        <h3>${escapeHtml(title)}</h3>
+
+                        <div class="document-meta">
+                            ${
+                                sectorName
+                                    ? `<span>Sector: ${escapeHtml(sectorName)}</span>`
+                                    : ""
+                            }
+
+                            ${
+                                documentItem?.document_type
+                                    ? `<span>${escapeHtml(documentItem.document_type)}</span>`
+                                    : ""
+                            }
+
+                            ${
+                                pages !== null
+                                    ? `<span>${escapeHtml(pages)} páginas</span>`
+                                    : ""
+                            }
+
+                            ${
+                                documentItem?.created_at
+                                    ? `<span>${escapeHtml(
+                                        new Date(documentItem.created_at)
+                                            .toLocaleString("es-AR")
+                                    )}</span>`
+                                    : ""
+                            }
+                        </div>
+                    </div>
+
+                    <span class="status-badge ${statusClass(status)}">
+                        ${escapeHtml(translateStatus(status))}
+                    </span>
+                </article>
+            `;
+        })
+        .join("");
+}
+
+
+async function loadDocuments() {
+    hideMessage(elements.documentsMessage);
+    elements.documentsLoading?.classList.remove("hidden");
+
+    try {
+        const response = await apiRequest(API.documents);
+        state.documents = toArray(response);
+        renderDocuments(state.documents);
+    } catch (error) {
+        console.error("Error cargando documentos:", error);
+
+        showMessage(
+            elements.documentsMessage,
+            `No se pudieron cargar los documentos: ${error.message}`,
+            "error"
+        );
+    } finally {
+        elements.documentsLoading?.classList.add("hidden");
+    }
+}
+
+
+function initializeDocumentEvents() {
+    elements.refreshDocumentsButton?.addEventListener(
+        "click",
+        loadDocuments
+    );
+}
+
+
+/* =========================================================
+   INICIALIZACIÓN
+   ========================================================= */
+
+async function initializeApplication() {
+    initializeNavigation();
+    initializeHierarchyEvents();
+    initializeSearchEvents();
+    initializeViewerEvents();
+    initializeFileEvents();
+    initializeDocumentEvents();
+
+    await checkApiStatus();
+    await loadOrganizations();
+}
+
+
+document.addEventListener("DOMContentLoaded", initializeApplication);
