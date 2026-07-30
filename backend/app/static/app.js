@@ -432,14 +432,86 @@ function renderOrganizations() {
                 <div class="entity-avatar">
                     ${escapeHtml((organization.name || "E").charAt(0).toUpperCase())}
                 </div>
-                <div>
+                <div class="entity-content">
                     <h4>${escapeHtml(organization.name)}</h4>
                     <p>${escapeHtml(organization.description || "Sin descripción")}</p>
                 </div>
+                <button
+                    class="danger-button organization-delete-button"
+                    type="button"
+                    data-organization-id="${escapeHtml(getObjectId(organization))}"
+                    data-organization-name="${escapeHtml(organization.name)}"
+                    aria-label="Eliminar empresa ${escapeHtml(organization.name)}"
+                >
+                    Eliminar
+                </button>
             </article>
         `)
         .join("");
 }
+
+async function deleteOrganization(organizationId, organizationName, button) {
+    const confirmed = window.confirm(
+        `¿Eliminar la empresa “${organizationName}”?\n\n` +
+        "También se eliminarán sus plantas, sectores, equipos y documentos asociados."
+    );
+
+    if (!confirmed) return;
+
+    hideMessage(elements.organizationMessage);
+
+    const originalText = button?.textContent || "Eliminar";
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Eliminando...";
+    }
+
+    try {
+        await apiRequest(`${API.organizations}/${organizationId}`, {
+            method: "DELETE",
+        });
+
+        await loadOrganizations();
+
+        showMessage(
+            elements.organizationMessage,
+            `Empresa “${organizationName}” eliminada correctamente.`,
+            "success"
+        );
+    } catch (error) {
+        showMessage(
+            elements.organizationMessage,
+            `No se pudo eliminar la empresa: ${error.message}`,
+            "error"
+        );
+
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+}
+
+
+function handleOrganizationsListClick(event) {
+    const button = event.target.closest(".organization-delete-button");
+    if (!button) return;
+
+    const organizationId = button.dataset.organizationId;
+    const organizationName = button.dataset.organizationName || "Empresa";
+
+    if (!organizationId) {
+        showMessage(
+            elements.organizationMessage,
+            "No se pudo identificar la empresa seleccionada.",
+            "error"
+        );
+        return;
+    }
+
+    deleteOrganization(organizationId, organizationName, button);
+}
+
 
 async function createOrganization(event) {
     event.preventDefault();
@@ -499,6 +571,7 @@ async function createOrganization(event) {
 function initializeOrganizationEvents() {
     elements.organizationForm?.addEventListener("submit", createOrganization);
     elements.refreshOrganizationsButton?.addEventListener("click", loadOrganizations);
+    elements.organizationsList?.addEventListener("click", handleOrganizationsListClick);
 }
 
 async function fetchPlantsByOrganization(organizationId) {

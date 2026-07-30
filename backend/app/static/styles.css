@@ -756,6 +756,33 @@ textarea {
     font-weight: 800;
 }
 
+.entity-content {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.danger-button {
+    flex: 0 0 auto;
+    padding: 9px 12px;
+    border: 1px solid rgba(200, 59, 59, 0.35);
+    border-radius: 9px;
+    background: rgba(200, 59, 59, 0.08);
+    color: var(--danger);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.danger-button:hover:not(:disabled) {
+    background: var(--danger);
+    color: #ffffff;
+}
+
+.danger-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
 .entity-card h4 {
     margin: 1px 0 5px;
 }
@@ -786,5 +813,14 @@ textarea {
 
     .nav-button {
         min-width: max-content;
+    }
+
+    .entity-card {
+        flex-wrap: wrap;
+    }
+
+    .organization-delete-button {
+        width: 100%;
+        margin-left: 55px;
     }
 }
