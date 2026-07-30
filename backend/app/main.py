@@ -34,6 +34,10 @@ def ensure_reference_columns() -> None:
         "y": "INTEGER",
         "width": "INTEGER",
         "height": "INTEGER",
+        "row_text": "TEXT",
+        "description": "TEXT",
+        "detected_type": "VARCHAR(100)",
+        "model": "VARCHAR(150)",
     }
     with engine.begin() as connection:
         for name, definition in definitions.items():
@@ -46,7 +50,7 @@ ensure_reference_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.6.4",
+    version="0.6.5",
 )
 
 # Ruta absoluta de la carpeta app

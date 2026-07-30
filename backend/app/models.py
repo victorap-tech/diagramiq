@@ -195,6 +195,11 @@ class DocumentPage(Base):
         back_populates="document_page",
         cascade="all, delete-orphan",
     )
+    search_terms = relationship(
+        "PageSearchTerm",
+        back_populates="document_page",
+        cascade="all, delete-orphan",
+    )
 
 class ComponentReference(Base):
     __tablename__ = "component_references"
@@ -222,6 +227,10 @@ class ComponentReference(Base):
     y = Column(Integer, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
+    row_text = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    detected_type = Column(String(100), nullable=True)
+    model = Column(String(150), nullable=True)
 
     document_page_id = Column(
         Integer,
@@ -238,3 +247,23 @@ class ComponentReference(Base):
         "DocumentPage",
         back_populates="references",
     )
+
+
+class PageSearchTerm(Base):
+    """Índice persistente de palabras con coordenadas y contexto visual."""
+    __tablename__ = "page_search_terms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    term = Column(String(180), nullable=False, index=True)
+    display_text = Column(String(255), nullable=False)
+    x = Column(Integer, nullable=True)
+    y = Column(Integer, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    row_text = Column(Text, nullable=True)
+    document_page_id = Column(
+        Integer, ForeignKey("document_pages.id"), nullable=False, index=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    document_page = relationship("DocumentPage", back_populates="search_terms")

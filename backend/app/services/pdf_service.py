@@ -173,6 +173,46 @@ def remove_existing_pages(
     db.flush()
 
 
+def analyze_context_text(row_text: str | None, search_text: str) -> dict:
+    combined = (row_text or "").strip()
+    upper = combined.upper()
+    type_rules = [
+        ("INTERRUPTOR GUARDAMOTOR", "Guardamotor"),
+        ("GUARDAMOTOR", "Guardamotor"),
+        ("CONTACTOR", "Contactor"),
+        ("RELÉ TÉRMICO", "Relé térmico"),
+        ("RELE TERMICO", "Relé térmico"),
+        ("FUSIBLE", "Fusible"),
+        ("SECCIONADOR", "Seccionador"),
+        ("INTERRUPTOR", "Interruptor"),
+        ("SENSOR", "Sensor"),
+        ("MOTOR", "Motor"),
+        ("VARIADOR", "Variador"),
+        ("CONECTOR", "Conector"),
+        ("MÓDULO", "Módulo"),
+        ("MODULO", "Módulo"),
+    ]
+    detected_type = next((label for key, label in type_rules if key in upper), None)
+    candidates = re.findall(
+        r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|[A-Z]{2,}\d{2,}[A-Z0-9-]*)\b",
+        combined, re.IGNORECASE,
+    )
+    model = next((x for x in candidates if x.upper().startswith(("3RV", "3RT"))), None)
+    if model is None:
+        model = next((x for x in candidates if x.upper() != search_text.upper()), None)
+    description = None
+    if combined:
+        description = re.sub(re.escape(search_text), "", combined, flags=re.IGNORECASE)
+        description = re.sub(r"^[=+\-A-Za-z0-9_/]+\s+", "", description).strip()
+        description = re.sub(r"\s{2,}", " ", description).strip(" -:=") or combined
+    return {
+        "row_text": combined or None,
+        "description": description,
+        "detected_type": detected_type,
+        "model": model,
+    }
+
+
 def save_page_references(
     page: fitz.Page,
     text_content: str,
@@ -188,6 +228,7 @@ def save_page_references(
     )
 
     saved_references = 0
+    page_words = page.get_text("words")
 
     for reference in references:
         rectangles = find_reference_rectangles(
@@ -198,6 +239,12 @@ def save_page_references(
         if not rectangles:
             # Se conserva la referencia aunque PyMuPDF
             # no consiga localizar visualmente el texto.
+            row_text = row_context_for_word(
+                page_words,
+                (rectangle.x0, rectangle.y0, rectangle.x1, rectangle.y1, reference),
+            )
+            context = analyze_context_text(row_text, reference)
+
             new_reference = models.ComponentReference(
                 reference=reference,
                 normalized_reference=reference,
@@ -208,6 +255,10 @@ def save_page_references(
                 y=None,
                 width=None,
                 height=None,
+                row_text=None,
+                description=None,
+                detected_type=None,
+                model=None,
                 document_page_id=document_page.id,
             )
 
@@ -232,6 +283,12 @@ def save_page_references(
                 rectangle.height * RENDER_SCALE
             )
 
+            row_text = row_context_for_word(
+                page_words,
+                (rectangle.x0, rectangle.y0, rectangle.x1, rectangle.y1, reference),
+            )
+            context = analyze_context_text(row_text, reference)
+
             new_reference = models.ComponentReference(
                 reference=reference,
                 normalized_reference=reference,
@@ -242,6 +299,10 @@ def save_page_references(
                 y=y,
                 width=width,
                 height=height,
+                row_text=context["row_text"],
+                description=context["description"],
+                detected_type=context["detected_type"],
+                model=context["model"],
                 document_page_id=document_page.id,
             )
 
@@ -251,6 +312,44 @@ def save_page_references(
     return saved_references
 
 
+
+
+def normalize_search_term(value: str) -> str:
+    """Normaliza una palabra sin perder letras acentuadas."""
+    return re.sub(r"[^0-9A-ZÁÉÍÓÚÜÑ_-]+", "", (value or "").upper()).strip()
+
+
+def row_context_for_word(words: list, target: tuple) -> str | None:
+    center_y = (target[1] + target[3]) / 2
+    tolerance = max(5.0, (target[3] - target[1]) * 1.25)
+    row = [w for w in words if abs(((w[1] + w[3]) / 2) - center_y) <= tolerance]
+    row.sort(key=lambda w: (round(w[1], 1), w[0]))
+    value = " ".join(str(w[4]) for w in row).strip()
+    return value or None
+
+
+def save_page_search_terms(page: fitz.Page, document_page: models.DocumentPage, db: Session) -> int:
+    """Guarda cada palabra del PDF una sola vez durante la indexación."""
+    words = page.get_text("words")
+    saved = 0
+    # Conservamos apariciones distintas; permite navegar entre coincidencias.
+    for word in words:
+        display = str(word[4]).strip()
+        term = normalize_search_term(display)
+        if len(term) < 2:
+            continue
+        db.add(models.PageSearchTerm(
+            term=term,
+            display_text=display[:255],
+            x=max(0, round(word[0] * RENDER_SCALE) - 4),
+            y=max(0, round(word[1] * RENDER_SCALE) - 4),
+            width=max(18, round((word[2] - word[0]) * RENDER_SCALE) + 8),
+            height=max(18, round((word[3] - word[1]) * RENDER_SCALE) + 8),
+            row_text=row_context_for_word(words, word),
+            document_page_id=document_page.id,
+        ))
+        saved += 1
+    return saved
 
 def find_text_coordinates(
     pdf_path: str | Path,
@@ -505,6 +604,11 @@ def process_pdf_document(
             save_page_references(
                 page=page,
                 text_content=text_content,
+                document_page=new_page,
+                db=db,
+            )
+            save_page_search_terms(
+                page=page,
                 document_page=new_page,
                 db=db,
             )
