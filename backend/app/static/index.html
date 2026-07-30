@@ -69,7 +69,99 @@
             >
                 Documentos
             </button>
+
+            <button
+                class="nav-button"
+                data-section="organizationsSection"
+                type="button"
+            >
+                Empresas
+            </button>
         </nav>
+
+        <!-- ========================= -->
+        <!-- EMPRESAS -->
+        <!-- ========================= -->
+
+        <section
+            id="organizationsSection"
+            class="app-section"
+        >
+            <div class="section-heading">
+                <div>
+                    <span class="section-label">Configuración</span>
+                    <h2>Cargar empresa</h2>
+                    <p>
+                        Registrá la empresa para luego crear sus plantas,
+                        sectores, equipos y documentos.
+                    </p>
+                </div>
+            </div>
+
+            <div class="management-grid">
+                <form id="organizationForm" class="card">
+                    <div class="form-grid single-column">
+                        <div class="form-group">
+                            <label for="organizationName">Nombre de la empresa *</label>
+                            <input
+                                id="organizationName"
+                                name="name"
+                                type="text"
+                                maxlength="150"
+                                placeholder="Ejemplo: Acon Timber"
+                                autocomplete="organization"
+                                required
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="organizationDescription">Descripción</label>
+                            <textarea
+                                id="organizationDescription"
+                                name="description"
+                                rows="4"
+                                placeholder="Actividad, ubicación o información de referencia"
+                            ></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button
+                            id="organizationSubmitButton"
+                            class="primary-button"
+                            type="submit"
+                        >
+                            Guardar empresa
+                        </button>
+                    </div>
+
+                    <div
+                        id="organizationMessage"
+                        class="message hidden"
+                        role="status"
+                        aria-live="polite"
+                    ></div>
+                </form>
+
+                <div class="card">
+                    <div class="card-heading">
+                        <div>
+                            <span class="section-label">Registradas</span>
+                            <h3>Empresas</h3>
+                        </div>
+                        <button
+                            id="refreshOrganizationsButton"
+                            class="secondary-button"
+                            type="button"
+                        >
+                            Actualizar
+                        </button>
+                    </div>
+
+                    <div id="organizationsList" class="entity-list"></div>
+                </div>
+            </div>
+        </section>
 
         <!-- ========================= -->
         <!-- BÚSQUEDA -->
