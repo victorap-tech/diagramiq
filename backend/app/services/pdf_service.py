@@ -313,6 +313,109 @@ def find_text_coordinates(
         if document is not None:
             document.close()
 
+
+
+def extract_match_context(
+    pdf_path: str | Path,
+    page_number: int,
+    search_text: str,
+) -> dict:
+    """Extrae la fila o zona de texto que rodea una coincidencia."""
+    clean_text = (search_text or "").strip()
+    empty = {
+        "row_text": None,
+        "description": None,
+        "detected_type": None,
+        "model": None,
+    }
+
+    if not clean_text or page_number < 1:
+        return empty
+
+    document = None
+    try:
+        document = fitz.open(str(pdf_path))
+        if page_number > document.page_count:
+            return empty
+
+        page = document.load_page(page_number - 1)
+        rectangles = page.search_for(clean_text, quads=False)
+        if not rectangles:
+            candidates = sorted(
+                {w for w in re.split(r"\s+", clean_text) if len(w) >= 2},
+                key=len, reverse=True,
+            )
+            for candidate in candidates:
+                rectangles = page.search_for(candidate, quads=False)
+                if rectangles:
+                    break
+        if not rectangles:
+            return empty
+
+        hit = rectangles[0]
+        words = page.get_text("words")
+        tolerance = max(5.0, hit.height * 1.25)
+        row_words = [
+            w for w in words
+            if abs(((w[1] + w[3]) / 2) - ((hit.y0 + hit.y1) / 2)) <= tolerance
+        ]
+        row_words.sort(key=lambda w: (round(w[1], 1), w[0]))
+        row_text = " ".join(str(w[4]) for w in row_words).strip()
+
+        combined = row_text
+        upper = combined.upper()
+
+        type_rules = [
+            ("GUARDAMOTOR", "Guardamotor"),
+            ("INTERRUPTOR GUARDAMOTOR", "Guardamotor"),
+            ("CONTACTOR", "Contactor"),
+            ("RELÉ TÉRMICO", "Relé térmico"),
+            ("RELE TERMICO", "Relé térmico"),
+            ("FUSIBLE", "Fusible"),
+            ("SECCIONADOR", "Seccionador"),
+            ("INTERRUPTOR", "Interruptor"),
+            ("SENSOR", "Sensor"),
+            ("MOTOR", "Motor"),
+            ("CONECTOR", "Conector"),
+            ("MÓDULO", "Módulo"),
+            ("MODULO", "Módulo"),
+        ]
+        detected_type = next((label for key, label in type_rules if key in upper), None)
+
+        model_candidates = re.findall(
+            r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|[A-Z]{2,}\d{2,}[A-Z0-9-]*)\b",
+            combined, re.IGNORECASE,
+        )
+        model = next(
+            (item for item in model_candidates if item.upper().startswith(("3RV", "3RT"))),
+            None,
+        )
+        if model is None:
+            model = next(
+                (item for item in model_candidates if item.upper() != clean_text.upper()),
+                None,
+            )
+
+        description = None
+        if row_text:
+            # Quita el término buscado para dejar una descripción más legible.
+            description = re.sub(re.escape(clean_text), "", row_text, flags=re.IGNORECASE)
+            description = re.sub(r"^[=+\-A-Za-z0-9_/]+\s+", "", description).strip()
+            description = re.sub(r"\s{2,}", " ", description).strip(" -:=") or row_text
+
+        return {
+            "row_text": combined or None,
+            "description": description,
+            "detected_type": detected_type,
+            "model": model,
+        }
+    except Exception:
+        return empty
+    finally:
+        if document is not None:
+            document.close()
+
+
 def process_pdf_document(
     document: models.Document,
     db: Session,

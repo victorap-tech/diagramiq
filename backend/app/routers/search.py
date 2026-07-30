@@ -9,6 +9,7 @@ from app.database import get_db
 from app.services.pdf_service import (
     REFERENCE_PATTERN,
     find_text_coordinates,
+    extract_match_context,
     normalize_reference,
 )
 
@@ -103,6 +104,11 @@ def serialize_reference_result(
     document = page.document
     sector = document.sector
     plant = sector.plant if sector else None
+    context = extract_match_context(
+        pdf_path=document.file_path,
+        page_number=page.page_number,
+        search_text=component_reference.reference,
+    )
 
     return {
         "match_type": "reference",
@@ -149,6 +155,7 @@ def serialize_reference_result(
             "width": component_reference.width,
             "height": component_reference.height,
         },
+        "context": context,
     }
 
 
@@ -392,6 +399,11 @@ def search_documents(
                         query=clean_query,
                     ),
                     "coordinates": find_text_coordinates(
+                        pdf_path=document.file_path,
+                        page_number=page.page_number,
+                        search_text=clean_query,
+                    ),
+                    "context": extract_match_context(
                         pdf_path=document.file_path,
                         page_number=page.page_number,
                         search_text=clean_query,

@@ -76,6 +76,10 @@ const elements = {
     viewerModal: document.getElementById("viewerModal"),
     viewerTitle: document.getElementById("viewerTitle"),
     viewerSubtitle: document.getElementById("viewerSubtitle"),
+    viewerContext: document.getElementById("viewerContext"),
+    viewerPreviousButton: document.getElementById("viewerPreviousButton"),
+    viewerNextButton: document.getElementById("viewerNextButton"),
+    viewerPosition: document.getElementById("viewerPosition"),
     viewerCanvas: document.getElementById("viewerCanvas"),
     viewerImage: document.getElementById("viewerImage"),
     referenceHighlight: document.getElementById("referenceHighlight"),
@@ -109,6 +113,7 @@ const state = {
 
     viewer: {
         result: null,
+        resultIndex: -1,
         coordinates: null,
         scale: 1,
     },
@@ -1101,6 +1106,19 @@ function renderSearchResults(results) {
                                 ? `<p class="result-fragment">${escapeHtml(fragment)}</p>`
                                 : ""
                         }
+
+                        ${(() => {
+                            const context = result?.context ?? {};
+                            const type = context.detected_type;
+                            const model = context.model;
+                            const description = context.description;
+                            if (!type && !model && !description) return "";
+                            return `<div class="result-context">
+                                ${type ? `<div><strong>Tipo:</strong> ${escapeHtml(type)}</div>` : ""}
+                                ${model ? `<div><strong>Modelo:</strong> ${escapeHtml(model)}</div>` : ""}
+                                ${description ? `<div><strong>Información del plano:</strong> ${escapeHtml(description)}</div>` : ""}
+                            </div>`;
+                        })()}
                     </div>
 
                     <div class="result-actions">
@@ -1291,7 +1309,52 @@ function scrollHighlightIntoView() {
 }
 
 
-function openViewer(result) {
+function updateViewerNavigation() {
+    const total = state.search.results.length;
+    const index = state.viewer.resultIndex;
+
+    if (elements.viewerPosition) {
+        elements.viewerPosition.textContent = total > 0 && index >= 0
+            ? `${index + 1} de ${total}`
+            : "0 de 0";
+    }
+
+    if (elements.viewerPreviousButton) {
+        elements.viewerPreviousButton.disabled = index <= 0;
+    }
+
+    if (elements.viewerNextButton) {
+        elements.viewerNextButton.disabled = index < 0 || index >= total - 1;
+    }
+}
+
+function renderViewerContext(result) {
+    if (!elements.viewerContext) return;
+    const context = result?.context ?? {};
+    const items = [];
+
+    if (context.detected_type) {
+        items.push(`<span class="context-chip">${escapeHtml(context.detected_type)}</span>`);
+    }
+    if (context.model) {
+        items.push(`<span class="context-chip">Modelo ${escapeHtml(context.model)}</span>`);
+    }
+    if (context.description) {
+        items.push(`<div class="context-description">${escapeHtml(context.description)}</div>`);
+    } else if (context.row_text) {
+        items.push(`<div class="context-description">${escapeHtml(context.row_text)}</div>`);
+    }
+
+    elements.viewerContext.innerHTML = items.join("");
+}
+
+function navigateViewer(step) {
+    const nextIndex = state.viewer.resultIndex + step;
+    if (nextIndex < 0 || nextIndex >= state.search.results.length) return;
+    openViewer(state.search.results[nextIndex], nextIndex);
+}
+
+function openViewer(result, resultIndex = null) {
     if (!result || !elements.viewerModal) return;
 
     const imageUrl =
@@ -1310,6 +1373,9 @@ function openViewer(result) {
     resetViewerZoom();
 
     state.viewer.result = result;
+    state.viewer.resultIndex = resultIndex !== null
+        ? resultIndex
+        : state.search.results.indexOf(result);
     state.viewer.coordinates = getResultCoordinates(result);
 
     const documentTitle = getResultDocumentTitle(result);
@@ -1329,6 +1395,8 @@ function openViewer(result) {
         elements.viewerSubtitle.textContent = subtitle.join(" · ");
     }
 
+    renderViewerContext(result);
+    updateViewerNavigation();
     hideReferenceHighlight();
 
     elements.viewerModal.classList.remove("hidden");
@@ -1380,6 +1448,7 @@ function closeViewer() {
     hideReferenceHighlight();
 
     state.viewer.result = null;
+    state.viewer.resultIndex = -1;
     state.viewer.coordinates = null;
     resetViewerZoom();
 }
@@ -1394,7 +1463,7 @@ function initializeViewerButtons() {
                     Number(button.dataset.resultIndex)
                 );
 
-                openViewer(result);
+                openViewer(result, Number(button.dataset.resultIndex));
             });
         });
 }
@@ -1403,13 +1472,17 @@ function initializeViewerButtons() {
 function initializeViewerEvents() {
     elements.closeViewerButton?.addEventListener("click", closeViewer);
     elements.modalOverlay?.addEventListener("click", closeViewer);
+    elements.viewerPreviousButton?.addEventListener("click", () => navigateViewer(-1));
+    elements.viewerNextButton?.addEventListener("click", () => navigateViewer(1));
 
     document.addEventListener("keydown", (event) => {
-        if (
-            event.key === "Escape" &&
-            !elements.viewerModal?.classList.contains("hidden")
-        ) {
+        const viewerOpen = !elements.viewerModal?.classList.contains("hidden");
+        if (event.key === "Escape" && viewerOpen) {
             closeViewer();
+        } else if (event.key === "ArrowRight" && viewerOpen) {
+            navigateViewer(1);
+        } else if (event.key === "ArrowLeft" && viewerOpen) {
+            navigateViewer(-1);
         }
     });
 

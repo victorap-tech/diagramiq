@@ -599,6 +599,59 @@ textarea {
     font-size: 1.5rem;
 }
 
+
+.viewer-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+}
+
+.viewer-navigation button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.viewer-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px 14px;
+    margin-top: 7px;
+    font-size: 0.9rem;
+}
+
+.viewer-context .context-chip {
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #eef3ff;
+    color: #243a75;
+    font-weight: 700;
+}
+
+.viewer-context .context-description {
+    flex-basis: 100%;
+    color: var(--text);
+    font-weight: 600;
+}
+
+.result-context {
+    display: grid;
+    gap: 4px;
+    margin-top: 9px;
+    padding: 10px 12px;
+    border-left: 4px solid #3158d4;
+    border-radius: 6px;
+    background: #f4f7ff;
+}
+
+.result-context strong {
+    color: #233b82;
+}
+
 .viewer-canvas {
     max-height: calc(92vh - 78px);
     overflow: auto;
