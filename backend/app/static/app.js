@@ -30,6 +30,14 @@ const elements = {
     navButtons: document.querySelectorAll(".nav-button"),
     appSections: document.querySelectorAll(".app-section"),
 
+    organizationForm: document.getElementById("organizationForm"),
+    organizationName: document.getElementById("organizationName"),
+    organizationDescription: document.getElementById("organizationDescription"),
+    organizationSubmitButton: document.getElementById("organizationSubmitButton"),
+    organizationMessage: document.getElementById("organizationMessage"),
+    organizationsList: document.getElementById("organizationsList"),
+    refreshOrganizationsButton: document.getElementById("refreshOrganizationsButton"),
+
     searchOrganization: document.getElementById("searchOrganization"),
     searchPlant: document.getElementById("searchPlant"),
     searchSector: document.getElementById("searchSector"),
@@ -369,6 +377,7 @@ async function loadOrganizations() {
     try {
         const response = await apiRequest(API.organizations);
         state.organizations = toArray(response);
+        renderOrganizations();
 
         fillSelect(
             elements.searchOrganization,
@@ -403,6 +412,94 @@ async function loadOrganizations() {
     }
 }
 
+
+
+function renderOrganizations() {
+    if (!elements.organizationsList) return;
+
+    if (!state.organizations.length) {
+        elements.organizationsList.innerHTML = `
+            <div class="empty-state">
+                Todavía no hay empresas cargadas.
+            </div>
+        `;
+        return;
+    }
+
+    elements.organizationsList.innerHTML = state.organizations
+        .map((organization) => `
+            <article class="entity-card">
+                <div class="entity-avatar">
+                    ${escapeHtml((organization.name || "E").charAt(0).toUpperCase())}
+                </div>
+                <div>
+                    <h4>${escapeHtml(organization.name)}</h4>
+                    <p>${escapeHtml(organization.description || "Sin descripción")}</p>
+                </div>
+            </article>
+        `)
+        .join("");
+}
+
+async function createOrganization(event) {
+    event.preventDefault();
+    hideMessage(elements.organizationMessage);
+
+    const name = elements.organizationName?.value.trim() || "";
+    const description = elements.organizationDescription?.value.trim() || "";
+
+    if (!name) {
+        showMessage(
+            elements.organizationMessage,
+            "Ingresá el nombre de la empresa.",
+            "error"
+        );
+        elements.organizationName?.focus();
+        return;
+    }
+
+    const button = elements.organizationSubmitButton;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Guardando...";
+    }
+
+    try {
+        const created = await apiRequest(API.organizations, {
+            method: "POST",
+            body: {
+                name,
+                description: description || null,
+            },
+        });
+
+        elements.organizationForm?.reset();
+        await loadOrganizations();
+
+        showMessage(
+            elements.organizationMessage,
+            `Empresa “${created.name}” guardada correctamente.`,
+            "success"
+        );
+        elements.organizationName?.focus();
+    } catch (error) {
+        showMessage(
+            elements.organizationMessage,
+            `No se pudo guardar la empresa: ${error.message}`,
+            "error"
+        );
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Guardar empresa";
+        }
+    }
+}
+
+function initializeOrganizationEvents() {
+    elements.organizationForm?.addEventListener("submit", createOrganization);
+    elements.refreshOrganizationsButton?.addEventListener("click", loadOrganizations);
+}
 
 async function fetchPlantsByOrganization(organizationId) {
     if (!organizationId) return [];
@@ -1626,6 +1723,7 @@ async function initializeApplication() {
     initializeViewerEvents();
     initializeFileEvents();
     initializeDocumentEvents();
+    initializeOrganizationEvents();
 
     await checkApiStatus();
     await loadOrganizations();
