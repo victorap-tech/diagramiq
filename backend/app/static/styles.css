@@ -621,11 +621,11 @@ textarea {
 
 .reference-highlight {
     position: absolute;
-    border: 3px solid #ff3b30;
-    background: rgba(255, 59, 48, 0.16);
+    border: 3px solid #f0b400;
+    background: rgba(255, 221, 0, 0.34);
     border-radius: 3px;
     pointer-events: none;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 18px rgba(255, 221, 0, 0.85);
 }
 
 .main-footer {

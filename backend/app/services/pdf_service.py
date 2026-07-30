@@ -250,6 +250,69 @@ def save_page_references(
     return saved_references
 
 
+
+def find_text_coordinates(
+    pdf_path: str | Path,
+    page_number: int,
+    search_text: str,
+) -> dict | None:
+    """
+    Localiza la primera coincidencia de un texto en una página.
+
+    Devuelve coordenadas expresadas sobre la imagen PNG renderizada,
+    usando la misma escala que el visor de DiagramIQ.
+    """
+    clean_text = (search_text or "").strip()
+
+    if not clean_text or page_number < 1:
+        return None
+
+    document = None
+
+    try:
+        document = fitz.open(str(pdf_path))
+
+        if page_number > document.page_count:
+            return None
+
+        page = document.load_page(page_number - 1)
+        rectangles = page.search_for(clean_text, quads=False)
+
+        if not rectangles:
+            # Si la consulta incluye varias palabras, se intenta localizar
+            # la palabra más larga para ofrecer igualmente una referencia
+            # visual útil.
+            words = sorted(
+                {word for word in re.split(r"\s+", clean_text) if len(word) >= 2},
+                key=len,
+                reverse=True,
+            )
+
+            for word in words:
+                rectangles = page.search_for(word, quads=False)
+                if rectangles:
+                    break
+
+        if not rectangles:
+            return None
+
+        rectangle = rectangles[0]
+        padding = 4
+
+        return {
+            "x": max(0, round(rectangle.x0 * RENDER_SCALE) - padding),
+            "y": max(0, round(rectangle.y0 * RENDER_SCALE) - padding),
+            "width": max(18, round(rectangle.width * RENDER_SCALE) + padding * 2),
+            "height": max(18, round(rectangle.height * RENDER_SCALE) + padding * 2),
+        }
+
+    except Exception:
+        return None
+
+    finally:
+        if document is not None:
+            document.close()
+
 def process_pdf_document(
     document: models.Document,
     db: Session,

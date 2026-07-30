@@ -8,6 +8,7 @@ from app import models
 from app.database import get_db
 from app.services.pdf_service import (
     REFERENCE_PATTERN,
+    find_text_coordinates,
     normalize_reference,
 )
 
@@ -390,7 +391,11 @@ def search_documents(
                         text=page.text_content,
                         query=clean_query,
                     ),
-                    "coordinates": None,
+                    "coordinates": find_text_coordinates(
+                        pdf_path=document.file_path,
+                        page_number=page.page_number,
+                        search_text=clean_query,
+                    ),
                 }
             )
 
