@@ -590,13 +590,20 @@ textarea {
 .icon-button {
     display: grid;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    min-width: 96px;
+    height: 42px;
+    padding: 0 13px;
     border: 0;
     border-radius: 10px;
     background: #edf1f6;
     color: var(--text);
-    font-size: 1.5rem;
+    font-size: 1.15rem;
+    font-weight: 800;
+    gap: 7px;
+}
+
+.close-label {
+    font-size: 0.92rem;
 }
 
 
@@ -903,5 +910,30 @@ textarea {
     .document-delete-button {
         flex: 1;
         min-width: 120px;
+    }
+}
+
+
+@media (max-width: 760px) {
+    .modal-header {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        background: var(--surface);
+    }
+
+    .icon-button {
+        position: sticky;
+        top: 8px;
+        flex: 0 0 auto;
+        background: #feecec;
+        color: var(--danger);
+        border: 1px solid rgba(200, 59, 59, 0.25);
+    }
+
+    .viewer-navigation {
+        position: sticky;
+        top: 0;
+        z-index: 3;
     }
 }

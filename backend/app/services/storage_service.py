@@ -23,23 +23,23 @@ def _env(*names: str) -> str | None:
 
 
 def bucket_name() -> str | None:
-    return _env("AWS_BUCKET_NAME", "S3_BUCKET_NAME", "BUCKET_NAME", "RAILWAY_BUCKET_NAME")
+    return _env("AWS_BUCKET_NAME", "S3_BUCKET_NAME", "BUCKET_NAME", "RAILWAY_BUCKET_NAME", "BUCKET")
 
 
 def storage_enabled() -> bool:
     return bool(
         bucket_name()
-        and _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID")
-        and _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY")
-        and _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL")
+        and _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY")
+        and _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY", "BUCKET_SECRET_ACCESS_KEY", "BUCKET_SECRET_KEY")
+        and _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL", "BUCKET_ENDPOINT", "ENDPOINT")
     )
 
 
 def get_s3_client():
-    endpoint = _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL")
-    access_key = _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID")
-    secret_key = _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY")
-    region = _env("AWS_DEFAULT_REGION", "AWS_REGION", "S3_REGION") or "us-east-1"
+    endpoint = _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL", "BUCKET_ENDPOINT", "ENDPOINT")
+    access_key = _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY")
+    secret_key = _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY", "BUCKET_SECRET_ACCESS_KEY", "BUCKET_SECRET_KEY")
+    region = _env("AWS_DEFAULT_REGION", "AWS_REGION", "S3_REGION", "BUCKET_REGION") or "us-east-1"
     if not (endpoint and access_key and secret_key and bucket_name()):
         raise RuntimeError("Faltan las credenciales del Bucket de Railway")
     return boto3.client(

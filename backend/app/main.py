@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -50,8 +50,10 @@ ensure_reference_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.6.5",
+    version="0.6.6",
 )
+
+APP_VERSION = "0.6.6"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -62,6 +64,16 @@ app.mount(
     StaticFiles(directory=BASE_DIR / "static"),
     name="static",
 )
+
+@app.middleware("http")
+async def prevent_stale_frontend_cache(request: Request, call_next):
+    """Evita que el celular siga mostrando una versión anterior tras desplegar."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 # ==========================
 # Routers
@@ -91,6 +103,7 @@ def frontend():
 def health():
     return {
         "status": "healthy",
+        "version": APP_VERSION,
         "storage": "railway_bucket" if storage_enabled() else "local",
         "bucket_configured": storage_enabled(),
         "bucket_name": bucket_name() if storage_enabled() else None,

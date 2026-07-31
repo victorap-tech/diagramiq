@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css"
+        href="/static/styles.css?v=0.6.6"
     >
 </head>
 
@@ -596,8 +596,9 @@
                     class="icon-button"
                     type="button"
                     aria-label="Cerrar visor"
+                    title="Cerrar plano"
                 >
-                    ×
+                    <span aria-hidden="true">×</span><span class="close-label">Cerrar</span>
                 </button>
             </div>
 
@@ -628,7 +629,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.6.3</span>
+        <span>DiagramIQ v0.6.6</span>
 
         <a
             href="/docs"
@@ -639,6 +640,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=0.6.6"></script>
 </body>
 </html>
