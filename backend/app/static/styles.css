@@ -937,3 +937,111 @@ textarea {
         z-index: 3;
     }
 }
+
+
+/* Visor móvil v0.6.8: navegación y cierre en una sola barra */
+.viewer-navigation {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) auto minmax(110px, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.viewer-navigation .viewer-nav-button,
+.viewer-close-button {
+    min-height: 42px;
+    white-space: nowrap;
+}
+
+.viewer-close-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 92px;
+    padding: 9px 13px;
+    border: 1px solid rgba(200, 59, 59, 0.28);
+    border-radius: 9px;
+    background: #feecec;
+    color: var(--danger);
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+@media (max-width: 760px) {
+    .modal {
+        padding: 0;
+    }
+
+    .modal-content {
+        width: 100vw;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .modal-header {
+        position: static;
+        padding: 12px 14px 10px;
+    }
+
+    .viewer-navigation {
+        position: sticky;
+        top: 0;
+        z-index: 6;
+        grid-template-columns: 1fr auto 1fr auto;
+        gap: 6px;
+        padding: 8px;
+        border-top: 0;
+        box-shadow: 0 3px 10px rgba(10, 17, 31, 0.14);
+    }
+
+    .viewer-navigation .viewer-nav-button,
+    .viewer-close-button {
+        min-width: 0;
+        min-height: 40px;
+        padding: 8px 9px;
+        font-size: 0.82rem;
+    }
+
+    .viewer-navigation #viewerPosition {
+        min-width: 48px;
+        text-align: center;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+
+    .viewer-close-button {
+        gap: 4px;
+    }
+
+    .viewer-canvas {
+        max-height: calc(100dvh - 142px);
+        padding: 8px;
+    }
+}
+
+@media (max-width: 390px) {
+    .viewer-navigation .viewer-nav-button {
+        font-size: 0;
+    }
+
+    #viewerPreviousButton::after {
+        content: "←";
+        font-size: 1.15rem;
+    }
+
+    #viewerNextButton::after {
+        content: "→";
+        font-size: 1.15rem;
+    }
+
+    .viewer-close-button span:last-child {
+        display: none;
+    }
+
+    .viewer-close-button {
+        font-size: 1.2rem;
+        min-width: 42px;
+    }
+}

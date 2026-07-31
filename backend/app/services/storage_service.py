@@ -2,7 +2,6 @@ import hashlib
 import os
 import shutil
 from pathlib import Path
-from typing import BinaryIO
 
 import boto3
 from botocore.config import Config
@@ -17,38 +16,107 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 def _env(*names: str) -> str | None:
     for name in names:
         value = os.getenv(name)
-        if value:
-            return value
+        if value and value.strip():
+            return value.strip()
     return None
 
 
 def bucket_name() -> str | None:
-    return _env("AWS_BUCKET_NAME", "S3_BUCKET_NAME", "BUCKET_NAME", "RAILWAY_BUCKET_NAME", "BUCKET")
-
-
-def storage_enabled() -> bool:
-    return bool(
-        bucket_name()
-        and _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY")
-        and _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY", "BUCKET_SECRET_ACCESS_KEY", "BUCKET_SECRET_KEY")
-        and _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL", "BUCKET_ENDPOINT", "ENDPOINT")
+    return _env(
+        "AWS_S3_BUCKET_NAME",  # Railway CLI / credentials output
+        "AWS_BUCKET_NAME",
+        "S3_BUCKET_NAME",
+        "BUCKET_NAME",
+        "RAILWAY_BUCKET_NAME",
+        "BUCKET",             # Railway reference variables
     )
 
 
+def access_key_id() -> str | None:
+    return _env(
+        "AWS_ACCESS_KEY_ID",
+        "S3_ACCESS_KEY_ID",
+        "BUCKET_ACCESS_KEY_ID",
+        "BUCKET_ACCESS_KEY",
+        "ACCESS_KEY_ID",       # Railway reference variables
+    )
+
+
+def secret_access_key() -> str | None:
+    return _env(
+        "AWS_SECRET_ACCESS_KEY",
+        "S3_SECRET_ACCESS_KEY",
+        "BUCKET_SECRET_ACCESS_KEY",
+        "BUCKET_SECRET_KEY",
+        "SECRET_ACCESS_KEY",   # Railway reference variables
+    )
+
+
+def endpoint_url() -> str | None:
+    return _env(
+        "AWS_ENDPOINT_URL",
+        "S3_ENDPOINT",
+        "S3_ENDPOINT_URL",
+        "BUCKET_ENDPOINT",
+        "ENDPOINT",            # Railway reference variables
+    )
+
+
+def region_name() -> str:
+    return _env(
+        "AWS_DEFAULT_REGION",
+        "AWS_REGION",
+        "S3_REGION",
+        "BUCKET_REGION",
+        "REGION",              # Railway reference variables
+    ) or "auto"
+
+
+def url_style() -> str:
+    style = (_env("AWS_S3_URL_STYLE", "S3_URL_STYLE", "BUCKET_URL_STYLE") or "virtual").lower()
+    return style if style in {"virtual", "path", "auto"} else "virtual"
+
+
+def storage_enabled() -> bool:
+    return bool(bucket_name() and access_key_id() and secret_access_key() and endpoint_url())
+
+
+def storage_config_status() -> dict:
+    missing = []
+    if not bucket_name():
+        missing.append("BUCKET/AWS_S3_BUCKET_NAME")
+    if not access_key_id():
+        missing.append("ACCESS_KEY_ID/AWS_ACCESS_KEY_ID")
+    if not secret_access_key():
+        missing.append("SECRET_ACCESS_KEY/AWS_SECRET_ACCESS_KEY")
+    if not endpoint_url():
+        missing.append("ENDPOINT/AWS_ENDPOINT_URL")
+    return {
+        "enabled": not missing,
+        "bucket_name": bucket_name(),
+        "endpoint_configured": bool(endpoint_url()),
+        "region": region_name(),
+        "url_style": url_style(),
+        "missing_variables": missing,
+    }
+
+
 def get_s3_client():
-    endpoint = _env("AWS_ENDPOINT_URL", "S3_ENDPOINT", "S3_ENDPOINT_URL", "BUCKET_ENDPOINT", "ENDPOINT")
-    access_key = _env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY_ID", "BUCKET_ACCESS_KEY")
-    secret_key = _env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY", "BUCKET_SECRET_ACCESS_KEY", "BUCKET_SECRET_KEY")
-    region = _env("AWS_DEFAULT_REGION", "AWS_REGION", "S3_REGION", "BUCKET_REGION") or "us-east-1"
-    if not (endpoint and access_key and secret_key and bucket_name()):
-        raise RuntimeError("Faltan las credenciales del Bucket de Railway")
+    if not storage_enabled():
+        missing = ", ".join(storage_config_status()["missing_variables"])
+        raise RuntimeError(f"Faltan variables del Bucket de Railway: {missing}")
+
     return boto3.client(
         "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        endpoint_url=endpoint_url(),
+        aws_access_key_id=access_key_id(),
+        aws_secret_access_key=secret_access_key(),
+        region_name=region_name(),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": url_style()},
+            retries={"max_attempts": 4, "mode": "standard"},
+        ),
     )
 
 
@@ -67,6 +135,9 @@ def parse_s3_path(value: str | Path) -> tuple[str, str]:
 
 def upload_file(local_path: str | Path, object_key: str) -> str:
     local_path = Path(local_path)
+    if not local_path.exists() or local_path.stat().st_size <= 0:
+        raise RuntimeError("El archivo temporal no existe o está vacío")
+
     if not storage_enabled():
         destination = LOCAL_UPLOAD_DIR / Path(object_key).name
         if local_path.resolve() != destination.resolve():
@@ -81,9 +152,18 @@ def upload_file(local_path: str | Path, object_key: str) -> str:
         object_key,
         ExtraArgs={"ContentType": "application/pdf"},
     )
-    cache_path = _cache_path(f"s3://{bucket}/{object_key}")
-    shutil.copy2(local_path, cache_path)
-    return f"s3://{bucket}/{object_key}"
+
+    # Verifica que Railway haya recibido realmente el objeto antes de guardar en DB.
+    metadata = client.head_object(Bucket=bucket, Key=object_key)
+    remote_size = int(metadata.get("ContentLength", 0))
+    if remote_size != local_path.stat().st_size:
+        raise RuntimeError(
+            f"La verificación del Bucket falló: local={local_path.stat().st_size} bytes, remoto={remote_size} bytes"
+        )
+
+    storage_path = f"s3://{bucket}/{object_key}"
+    shutil.copy2(local_path, _cache_path(storage_path))
+    return storage_path
 
 
 def _cache_path(storage_path: str | Path) -> Path:

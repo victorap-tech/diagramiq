@@ -591,21 +591,22 @@
                     <div id="viewerContext" class="viewer-context"></div>
                 </div>
 
+            </div>
+
+            <div class="viewer-navigation">
+                <button id="viewerPreviousButton" class="secondary-button viewer-nav-button" type="button">← Anterior</button>
+                <strong id="viewerPosition">1 de 1</strong>
+                <button id="viewerNextButton" class="primary-button viewer-nav-button" type="button">Siguiente →</button>
                 <button
                     id="closeViewerButton"
-                    class="icon-button"
+                    class="viewer-close-button"
                     type="button"
                     aria-label="Cerrar visor"
                     title="Cerrar plano"
                 >
-                    <span aria-hidden="true">×</span><span class="close-label">Cerrar</span>
+                    <span aria-hidden="true">×</span>
+                    <span>Cerrar</span>
                 </button>
-            </div>
-
-            <div class="viewer-navigation">
-                <button id="viewerPreviousButton" class="secondary-button" type="button">← Anterior</button>
-                <strong id="viewerPosition">1 de 1</strong>
-                <button id="viewerNextButton" class="primary-button" type="button">Siguiente →</button>
             </div>
 
             <div
@@ -629,7 +630,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.6.6</span>
+        <span>DiagramIQ v0.6.8</span>
 
         <a
             href="/docs"
