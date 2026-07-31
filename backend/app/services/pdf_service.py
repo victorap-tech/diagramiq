@@ -20,26 +20,17 @@ RENDER_SCALE = 1.5
 
 REFERENCE_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:"
-    r"KM\d+[A-Z0-9_-]*|"
-    r"KA\d+[A-Z0-9_-]*|"
-    r"QF\d+[A-Z0-9_-]*|"
-    r"QS\d+[A-Z0-9_-]*|"
-    r"FU\d+[A-Z0-9_-]*|"
-    r"FR\d+[A-Z0-9_-]*|"
-    r"PLC\d+[A-Z0-9_-]*|"
-    r"DI\d+[A-Z0-9_-]*|"
-    r"DO\d+[A-Z0-9_-]*|"
-    r"AI\d+[A-Z0-9_-]*|"
-    r"AO\d+[A-Z0-9_-]*|"
-    r"KM\d+[A-Z0-9_-]*|"
-    r"M\d+[A-Z0-9_-]*|"
-    r"B\d+[A-Z0-9_-]*|"
-    r"X\d+[A-Z0-9_-]*|"
-    r"V\d+[A-Z0-9_-]*|"
-    r"\d+[A-Z]\d+[A-Z0-9_-]*"
+    # Designaciones IEC habituales, con o sin prefijo gráfico (=, + o -).
+    r"[-=+]?(?:KM|KA|QF|QS|QA|FU|FR|FC|PLC|DI|DO|AI|AO|XD|XT|X|M|B|V)"
+    r"[A-Z0-9]+(?:[_./-][A-Z0-9]+)*|"
+    # Potenciales y nombres de conductores: 401_A1+, 24VDC+, L1, N, PE.
+    r"\d{2,}[A-Z0-9]*(?:_[A-Z0-9]+)+(?:[+-])?|"
+    r"(?:24VDC|24VAC|230VAC|400VAC)[+-]?|"
+    r"(?:L[123]|N|PE)"
     r")(?![A-Z0-9])",
     re.IGNORECASE,
 )
+
 
 
 def normalize_reference(reference: str) -> str:
@@ -52,11 +43,9 @@ def normalize_reference(reference: str) -> str:
         570u4   -> 570U4
     """
     value = reference.strip().upper()
-
-    value = value.strip(
-        " \t\r\n.,;:()[]{}<>+=/\\"
-    )
-
+    value = value.strip(" \t\r\n.,;:()[]{}<>/\\")
+    # En planos EPLAN los signos iniciales suelen ser prefijos gráficos.
+    value = value.lstrip("=-")
     return value
 
 
@@ -71,6 +60,12 @@ def classify_reference(reference: str) -> str:
 
     if value.startswith("QF"):
         return "Interruptor automático"
+
+    if value.startswith("QA"):
+        return "Interruptor o actuador"
+
+    if value.startswith("FC"):
+        return "Contacto o fin de carrera"
 
     if value.startswith("QS"):
         return "Seccionador"
@@ -93,7 +88,7 @@ def classify_reference(reference: str) -> str:
     if value.startswith("B"):
         return "Sensor"
 
-    if value.startswith("X"):
+    if value.startswith(("XD", "XT", "X")):
         return "Bornera o conector"
 
     if value.startswith("V"):
@@ -237,14 +232,8 @@ def save_page_references(
         )
 
         if not rectangles:
-            # Se conserva la referencia aunque PyMuPDF
-            # no consiga localizar visualmente el texto.
-            row_text = row_context_for_word(
-                page_words,
-                (rectangle.x0, rectangle.y0, rectangle.x1, rectangle.y1, reference),
-            )
-            context = analyze_context_text(row_text, reference)
-
+            # Se conserva la referencia aunque PyMuPDF no consiga localizarla.
+            # No se intenta usar un rectángulo inexistente.
             new_reference = models.ComponentReference(
                 reference=reference,
                 normalized_reference=reference,

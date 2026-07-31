@@ -1108,6 +1108,12 @@ function renderSearchResults(results) {
                         }
 
                         ${(() => {
+                            const related = result?.related_references ?? [];
+                            if (!related.length) return "";
+                            return `<div class="related-references"><strong>Relacionados:</strong> ${related.map((ref) => `<button type="button" class="reference-chip related-reference-button" data-reference="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join(" ")}</div>`;
+                        })()}
+
+                        ${(() => {
                             const context = result?.context ?? {};
                             const type = context.detected_type;
                             const model = context.model;
@@ -1131,6 +1137,12 @@ function renderSearchResults(results) {
 
     state.search.results = results;
     initializeViewerButtons();
+    document.querySelectorAll(".related-reference-button").forEach((button) => {
+        button.addEventListener("click", () => {
+            if (elements.searchInput) elements.searchInput.value = button.dataset.reference || "";
+            elements.searchForm?.requestSubmit();
+        });
+    });
 }
 
 

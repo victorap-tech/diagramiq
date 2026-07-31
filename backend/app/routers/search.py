@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from app import models
 from app.database import get_db
-from app.services.pdf_service import REFERENCE_PATTERN, analyze_context_text, normalize_reference, normalize_search_term
+from app.services.pdf_service import (
+    REFERENCE_PATTERN, analyze_context_text, extract_references,
+    normalize_reference, normalize_search_term,
+)
 
 router = APIRouter(prefix="/search", tags=["Búsqueda"])
 
@@ -57,6 +60,10 @@ def serialize_reference(item: models.ComponentReference, query: str) -> dict:
         "detected_type": item.detected_type,
         "model": item.model,
     }
+    related = [
+        ref for ref in extract_references(item.row_text or "")
+        if normalize_reference(ref) != normalize_reference(item.reference)
+    ]
     result.update({
         "match_type": "reference",
         "reference": item.reference,
@@ -65,6 +72,7 @@ def serialize_reference(item: models.ComponentReference, query: str) -> dict:
         "fragment": item.row_text or build_fragment(page.text_content, item.reference),
         "coordinates": {"x": item.x, "y": item.y, "width": item.width, "height": item.height},
         "context": context,
+        "related_references": related[:12],
     })
     return result
 
@@ -143,7 +151,7 @@ def search_documents(
         tokens = [normalize_search_term(x) for x in re.split(r"\s+", clean_query)]
         tokens = [x for x in tokens if len(x) >= 2]
         if not tokens:
-            return {"query": clean_query, "results": [], "count": 0, "total": 0, "limit": limit, "offset": offset, "has_more": False, "search_mode": "index"}
+            return {"query": clean_query, "detected_references": extracted_references, "results": [], "count": 0, "total": 0, "limit": limit, "offset": offset, "has_more": False, "search_mode": "index"}
         indexed_term = max(tokens, key=len)
         query = (
             db.query(models.PageSearchTerm)
@@ -167,6 +175,7 @@ def search_documents(
 
     return {
         "query": clean_query,
+        "detected_references": extracted_references,
         "sector_id": sector_id,
         "document_id": document_id,
         "results": results,

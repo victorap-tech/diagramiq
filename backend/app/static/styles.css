@@ -1045,3 +1045,9 @@ textarea {
         min-width: 42px;
     }
 }
+
+
+/* v0.7.0: referencias relacionadas detectadas en la misma línea del plano */
+.related-references { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.reference-chip { border: 1px solid #9fb5cf; border-radius: 999px; background: #eef5fc; padding: 4px 9px; font-size: .82rem; cursor: pointer; }
+.reference-chip:hover { background: #dcecff; }
