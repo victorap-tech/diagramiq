@@ -74,6 +74,7 @@ class DocumentResponse(BaseModel):
     title: str
     filename: str
     file_path: str
+    content_hash: str | None = None
     description: str | None = None
     document_type: str | None = None
     page_count: int | None = None

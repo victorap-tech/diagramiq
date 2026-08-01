@@ -117,6 +117,7 @@ class Document(Base):
     title = Column(String(200), nullable=False)
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    content_hash = Column(String(64), nullable=True, index=True)
     description = Column(Text, nullable=True)
     document_type = Column(String(100), nullable=True)
     page_count = Column(Integer, nullable=True)

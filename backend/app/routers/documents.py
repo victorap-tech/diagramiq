@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -21,7 +22,7 @@ from app import models, schemas
 from app.database import SessionLocal, get_db
 from app.services.pdf_service import process_pdf_document
 from app.services.storage_service import (
-    delete_file, get_object_stream, is_s3_path, storage_enabled, upload_file,
+    delete_file, get_object_stream, is_s3_path, resolve_local_file, storage_enabled, upload_file,
 )
 
 
@@ -36,15 +37,145 @@ UPLOAD_DIR = BASE_DIR / "uploads" / "documents"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def calculate_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remove_document_files(document: models.Document) -> None:
+    """Elimina el PDF, las imágenes renderizadas y la copia de caché."""
+    for page in list(document.pages):
+        if not page.image_path:
+            continue
+        try:
+            image_path = Path(page.image_path)
+            if image_path.exists():
+                image_path.unlink()
+        except Exception:
+            pass
+
+    try:
+        delete_file(document.file_path)
+    except Exception:
+        pass
+
+
+def _document_priority(document: models.Document) -> tuple[int, int, int]:
+    """Elige el registro más útil: procesado, con páginas y luego el más antiguo."""
+    status_value = (document.processing_status or "").lower()
+    completed = 1 if status_value in {"completed", "processed"} else 0
+    has_pages = 1 if document.pages else 0
+    return (completed, has_pages, -document.id)
+
+
+def consolidate_duplicate_documents(
+    db: Session,
+    documents: list[models.Document],
+) -> tuple[models.Document | None, int]:
+    """Conserva un solo registro y limpia los duplicados del Bucket y la DB."""
+    unique = {document.id: document for document in documents}
+    candidates = list(unique.values())
+    if not candidates:
+        return None, 0
+
+    keeper = max(candidates, key=_document_priority)
+    duplicates = [document for document in candidates if document.id != keeper.id]
+    if not duplicates:
+        return keeper, 0
+
+    duplicate_files = list(duplicates)
+    try:
+        for duplicate in duplicates:
+            db.delete(duplicate)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    for duplicate in duplicate_files:
+        _remove_document_files(duplicate)
+
+    return keeper, len(duplicates)
+
+
+def find_existing_document_by_hash(
+    db: Session,
+    content_hash: str,
+    sector_id: int,
+    original_filename: str,
+    page_count: int,
+) -> models.Document | None:
+    """Busca un PDF idéntico, completa hashes antiguos y limpia duplicados."""
+    hashed_matches = (
+        db.query(models.Document)
+        .filter(
+            models.Document.sector_id == sector_id,
+            models.Document.content_hash == content_hash,
+        )
+        .order_by(models.Document.id.asc())
+        .all()
+    )
+
+    # Compatibilidad con documentos cargados antes de v0.7.2.
+    legacy_candidates = (
+        db.query(models.Document)
+        .filter(
+            models.Document.sector_id == sector_id,
+            models.Document.content_hash.is_(None),
+            models.Document.page_count == page_count,
+            func.lower(models.Document.filename) == original_filename.lower(),
+        )
+        .order_by(models.Document.id.asc())
+        .all()
+    )
+
+    matches = list(hashed_matches)
+    changed = False
+    for candidate in legacy_candidates:
+        try:
+            candidate_path = resolve_local_file(candidate.file_path)
+            candidate_hash = calculate_sha256(candidate_path)
+            candidate.content_hash = candidate_hash
+            changed = True
+            if candidate_hash == content_hash:
+                matches.append(candidate)
+        except Exception:
+            continue
+
+    if changed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    if not matches:
+        return None
+
+    keeper, _ = consolidate_duplicate_documents(db, matches)
+    return keeper
+
+
 def process_document_in_background(document_id: int) -> None:
-    """Indexa el PDF después de responder la carga."""
+    """Indexa el PDF y revierte completamente una carga que falle."""
     db = SessionLocal()
+    document = None
     try:
         document = db.query(models.Document).filter(models.Document.id == document_id).first()
         if document is not None:
             process_pdf_document(document=document, db=db)
     except Exception:
         db.rollback()
+        document = db.query(models.Document).filter(models.Document.id == document_id).first()
+        if document is not None:
+            _remove_document_files(document)
+            try:
+                db.delete(document)
+                db.commit()
+            except Exception:
+                db.rollback()
     finally:
         db.close()
 
@@ -228,6 +359,19 @@ def upload_document(
     finally:
         file.file.close()
 
+    content_hash = calculate_sha256(file_path)
+    existing_document = find_existing_document_by_hash(
+        db=db,
+        content_hash=content_hash,
+        sector_id=sector.id,
+        original_filename=original_filename,
+        page_count=page_count,
+    )
+    if existing_document is not None:
+        if file_path.exists():
+            file_path.unlink()
+        return existing_document
+
     clean_description = (
         description.strip()
         if description and description.strip()
@@ -258,6 +402,7 @@ def upload_document(
         title=clean_title,
         filename=original_filename,
         file_path=stored_path,
+        content_hash=content_hash,
         description=clean_description,
         document_type=clean_document_type,
         page_count=page_count,
@@ -287,6 +432,48 @@ def upload_document(
     background_tasks.add_task(process_document_in_background, new_document.id)
 
     return new_document
+
+
+@router.post("/cleanup-duplicates")
+def cleanup_duplicate_documents(db: Session = Depends(get_db)):
+    """Calcula hashes faltantes y elimina copias idénticas, conservando una."""
+    documents = db.query(models.Document).order_by(models.Document.id.asc()).all()
+    groups: dict[tuple[int, str], list[models.Document]] = {}
+    skipped = 0
+
+    for document in documents:
+        content_hash = document.content_hash
+        if not content_hash:
+            try:
+                content_hash = calculate_sha256(resolve_local_file(document.file_path))
+                document.content_hash = content_hash
+                db.flush()
+            except Exception:
+                skipped += 1
+                continue
+        groups.setdefault((document.sector_id, content_hash), []).append(document)
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"No se pudieron actualizar los hashes: {exc}")
+
+    removed = 0
+    kept = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        _, deleted_count = consolidate_duplicate_documents(db, group)
+        removed += deleted_count
+        kept += 1
+
+    return {
+        "message": f"Limpieza terminada: {removed} duplicado(s) eliminado(s).",
+        "removed": removed,
+        "groups_consolidated": kept,
+        "skipped": skipped,
+    }
 
 
 @router.post(
@@ -568,8 +755,11 @@ def delete_document(
         )
 
     for image_path in page_image_paths:
-        if image_path.exists():
-            image_path.unlink()
+        try:
+            if image_path.exists():
+                image_path.unlink()
+        except Exception:
+            pass
 
     try:
         delete_file(document_storage_path)

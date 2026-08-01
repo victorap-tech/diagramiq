@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.7.0"
+        href="/static/styles.css?v=0.7.3"
     >
 </head>
 
@@ -540,13 +540,22 @@
                     </p>
                 </div>
 
-                <button
-                    id="refreshDocumentsButton"
-                    class="secondary-button"
-                    type="button"
-                >
-                    Actualizar
-                </button>
+                <div class="document-toolbar-actions">
+                    <button
+                        id="cleanupDocumentsButton"
+                        class="secondary-button"
+                        type="button"
+                    >
+                        Limpiar duplicados
+                    </button>
+                    <button
+                        id="refreshDocumentsButton"
+                        class="secondary-button"
+                        type="button"
+                    >
+                        Actualizar
+                    </button>
+                </div>
             </div>
 
             <div
@@ -630,7 +639,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.7.0</span>
+        <span>DiagramIQ v0.7.3</span>
 
         <a
             href="/docs"
@@ -641,6 +650,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.7.0"></script>
+    <script src="/static/app.js?v=0.7.3"></script>
 </body>
 </html>

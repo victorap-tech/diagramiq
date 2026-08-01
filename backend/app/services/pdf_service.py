@@ -21,7 +21,7 @@ RENDER_SCALE = 1.5
 REFERENCE_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:"
     # Designaciones IEC habituales, con o sin prefijo gráfico (=, + o -).
-    r"[-=+]?(?:KM|KA|QF|QS|QA|FU|FR|FC|PLC|DI|DO|AI|AO|XD|XT|X|M|B|V)"
+    r"[-=+]?(?:KM|KA|KE|K|QF|QS|QA|FU|FR|FC|PLC|DI|DO|AI|AO|XD|XT|X|M|B|V)"
     r"[A-Z0-9]+(?:[_./-][A-Z0-9]+)*|"
     # Potenciales y nombres de conductores: 401_A1+, 24VDC+, L1, N, PE.
     r"\d{2,}[A-Z0-9]*(?:_[A-Z0-9]+)+(?:[+-])?|"

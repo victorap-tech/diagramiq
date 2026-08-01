@@ -47,13 +47,28 @@ def ensure_reference_columns() -> None:
 
 ensure_reference_columns()
 
+
+def ensure_document_columns() -> None:
+    """Agrega el hash a bases existentes sin borrar documentos ni índices."""
+    inspector = inspect(engine)
+    if "documents" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("documents")}
+    with engine.begin() as connection:
+        if "content_hash" not in existing:
+            connection.execute(text("ALTER TABLE documents ADD COLUMN content_hash VARCHAR(64)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_content_hash ON documents (content_hash)"))
+
+
+ensure_document_columns()
+
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.7.0",
+    version="0.7.3",
 )
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.7.3"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent

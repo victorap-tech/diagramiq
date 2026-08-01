@@ -69,6 +69,7 @@ const elements = {
     uploadMessage: document.getElementById("uploadMessage"),
 
     refreshDocumentsButton: document.getElementById("refreshDocumentsButton"),
+    cleanupDocumentsButton: document.getElementById("cleanupDocumentsButton"),
     documentsMessage: document.getElementById("documentsMessage"),
     documentsLoading: document.getElementById("documentsLoading"),
     documentsList: document.getElementById("documentsList"),
@@ -1987,8 +1988,34 @@ async function handleDocumentsListClick(event) {
     }
 }
 
+async function cleanupDuplicateDocuments() {
+    if (!confirm("¿Limpiar los PDF duplicados? Se conservará una sola copia procesada de cada archivo.")) {
+        return;
+    }
+
+    const button = elements.cleanupDocumentsButton;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Limpiando...";
+    }
+
+    try {
+        const result = await apiRequest(`${API.documents}/cleanup-duplicates`, { method: "POST" });
+        showMessage(elements.documentsMessage, result?.message || "Limpieza terminada.", "success");
+        await loadDocuments();
+    } catch (error) {
+        showMessage(elements.documentsMessage, `No se pudo limpiar: ${error.message}`, "error");
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Limpiar duplicados";
+        }
+    }
+}
+
 function initializeDocumentEvents() {
     elements.refreshDocumentsButton?.addEventListener("click", loadDocuments);
+    elements.cleanupDocumentsButton?.addEventListener("click", cleanupDuplicateDocuments);
     elements.documentsList?.addEventListener("click", handleDocumentsListClick);
 }
 
