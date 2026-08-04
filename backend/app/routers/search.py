@@ -182,6 +182,113 @@ def score_term_result(item: models.PageSearchTerm, searched_text: str) -> tuple[
     }
 
 
+
+def add_relative_visual_score(
+    ranked_items: list[tuple[int, int, int, models.ComponentReference, dict]],
+) -> list[tuple[int, int, int, models.ComponentReference, dict]]:
+    """Ajusta el ranking dentro de cada página usando el tamaño visual relativo.
+
+    En planos EPLAN la designación principal del componente suele imprimirse
+    más grande que una referencia de cable o continuidad. Este ajuste se hace
+    sobre el índice ya guardado, por lo que no abre el PDF ni ralentiza la
+    búsqueda.
+    """
+    by_page: dict[int, list[tuple[int, int, int, models.ComponentReference, dict]]] = {}
+    for row in ranked_items:
+        by_page.setdefault(row[3].document_page_id, []).append(row)
+
+    adjusted = []
+    for page_rows in by_page.values():
+        heights = [max(0, r[3].height or 0) for r in page_rows]
+        widths = [max(0, r[3].width or 0) for r in page_rows]
+        max_height = max(heights, default=0)
+        max_width = max(widths, default=0)
+
+        for score, page_number, item_id, item, ranking in page_rows:
+            visual_bonus = 0
+            h = max(0, item.height or 0)
+            w = max(0, item.width or 0)
+            reasons = list(ranking.get("ranking_reasons") or [])
+
+            if max_height and h >= max_height * 0.9:
+                visual_bonus += 24
+                reasons.append("texto_principal_mas_alto")
+            elif max_height and h <= max_height * 0.65:
+                visual_bonus -= 18
+                reasons.append("texto_pequeno_de_cable")
+
+            if max_width and w >= max_width * 0.9:
+                visual_bonus += 8
+            elif max_width and w <= max_width * 0.55:
+                visual_bonus -= 5
+
+            # Una designación próxima al tercio superior/central del plano es
+            # más probable que sea el rótulo del símbolo que una nota de borde.
+            if item.y is not None and item.y > 20:
+                visual_bonus += 2
+
+            final_score = score + visual_bonus
+            new_ranking = dict(ranking)
+            new_ranking.update({
+                "score": final_score,
+                "ranking_reasons": reasons,
+                "visual_priority": visual_bonus,
+            })
+            adjusted.append((final_score, page_number, item_id, item, new_ranking))
+
+    return adjusted
+
+
+def select_primary_per_page(
+    ranked_items: list[tuple[int, int, int, models.ComponentReference, dict]],
+) -> list[tuple[int, int, int, models.ComponentReference, dict]]:
+    """Devuelve primero una sola aparición principal por página.
+
+    Las otras apariciones se conservan como secundarias para no perder
+    información, pero no interfieren con el recorrido principal del visor.
+    """
+    ranked_items = add_relative_visual_score(ranked_items)
+    ranked_items.sort(key=lambda value: (-value[0], value[1], value[2]))
+
+    primary = []
+    secondary = []
+    seen_pages: set[int] = set()
+    for row in ranked_items:
+        score, page_number, item_id, item, ranking = row
+        ranking = dict(ranking)
+        if item.document_page_id not in seen_pages:
+            seen_pages.add(item.document_page_id)
+            ranking["is_primary_component"] = ranking.get("page_kind") != "list"
+            ranking["result_role"] = "primary" if ranking.get("page_kind") != "list" else "list"
+            primary.append((score, page_number, item_id, item, ranking))
+        else:
+            ranking["is_primary_component"] = False
+            ranking["result_role"] = "secondary_occurrence"
+            secondary.append((score, page_number, item_id, item, ranking))
+
+    # Primero componentes posibles/reales; luego listados y por último las
+    # repeticiones secundarias dentro de una página.
+    primary.sort(key=lambda r: (r[4].get("page_kind") == "list", -r[0], r[1], r[2]))
+    secondary.sort(key=lambda r: (-r[0], r[1], r[2]))
+    return primary + secondary
+
+
+def expanded_component_coordinates(item: models.ComponentReference, ranking: dict) -> dict:
+    """Amplía el rectángulo del rótulo para incluir el símbolo cercano."""
+    if None in (item.x, item.y, item.width, item.height):
+        return {"x": item.x, "y": item.y, "width": item.width, "height": item.height}
+
+    if ranking.get("result_role") != "primary":
+        return {"x": item.x, "y": item.y, "width": item.width, "height": item.height}
+
+    # En la mayoría de esquemas la referencia está encima o al costado del
+    # símbolo. El visor centra esta zona ampliada sin ocultar la etiqueta.
+    left = max(0, item.x - max(45, item.width * 2))
+    top = max(0, item.y - max(35, item.height * 2))
+    width = max(110, item.width * 5)
+    height = max(105, item.height * 7)
+    return {"x": left, "y": top, "width": width, "height": height}
+
 def extract_search_references(query: str) -> list[str]:
     matches = REFERENCE_PATTERN.findall((query or "").upper())
     return sorted({normalize_reference(m) for m in matches if normalize_reference(m)})
@@ -219,7 +326,7 @@ def base_result(page: models.DocumentPage, query: str) -> dict:
     }
 
 
-def serialize_reference(item: models.ComponentReference, query: str) -> dict:
+def serialize_reference(item: models.ComponentReference, query: str, ranking: dict | None = None) -> dict:
     page = item.document_page
     result = base_result(page, query)
     context = {
@@ -238,7 +345,8 @@ def serialize_reference(item: models.ComponentReference, query: str) -> dict:
         "normalized_reference": item.normalized_reference or normalize_reference(item.reference),
         "component_type": item.detected_type or item.component_type,
         "fragment": item.row_text or build_fragment(page.text_content, item.reference),
-        "coordinates": {"x": item.x, "y": item.y, "width": item.width, "height": item.height},
+        "coordinates": expanded_component_coordinates(item, ranking or {}),
+        "label_coordinates": {"x": item.x, "y": item.y, "width": item.width, "height": item.height},
         "context": context,
         "related_references": related[:12],
     })
@@ -318,12 +426,12 @@ def search_documents(
             ranking_score, ranking = score_reference_result(item, primary_reference)
             ranked_items.append((ranking_score, item.document_page.page_number, item.id, item, ranking))
 
-        ranked_items.sort(key=lambda value: (-value[0], value[1], value[2]))
+        ranked_items = select_primary_per_page(ranked_items)
         total = len(ranked_items)
         selected = ranked_items[offset: offset + limit]
         results = []
         for _score, _page_number, _item_id, item, ranking in selected:
-            serialized = serialize_reference(item, clean_query)
+            serialized = serialize_reference(item, clean_query, ranking)
             serialized.update(ranking)
             results.append(serialized)
     else:

@@ -1190,3 +1190,18 @@ textarea {
 .circuit-columns h3 { margin:.25rem 0 .75rem; font-size:1rem; }
 .empty-state.compact { padding:1rem; min-height:auto; }
 @media (max-width: 760px) { .circuit-columns { grid-template-columns:1fr; } }
+
+/* v0.9.7: prioridad visual del componente principal */
+.result-priority-badge {
+    display: inline-flex;
+    width: fit-content;
+    margin: 8px 0 4px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: .76rem;
+    font-weight: 800;
+    letter-spacing: .01em;
+}
+.result-priority-badge.primary { background:#e5f6eb; color:#176b36; border:1px solid #9bd2ad; }
+.result-priority-badge.list { background:#fff4dc; color:#825300; border:1px solid #e7c477; }
+.result-priority-badge.secondary { background:#eef2f6; color:#566474; border:1px solid #ccd5df; }

@@ -1127,6 +1127,19 @@ function renderSearchResults(results) {
                             }
                         </div>
 
+                        ${(() => {
+                            if (result?.result_role === "primary" && result?.page_kind !== "list") {
+                                return `<span class="result-priority-badge primary">Componente principal</span>`;
+                            }
+                            if (result?.page_kind === "list" || result?.result_role === "list") {
+                                return `<span class="result-priority-badge list">Aparición en listado</span>`;
+                            }
+                            if (result?.result_role === "secondary_occurrence") {
+                                return `<span class="result-priority-badge secondary">Otra aparición en la página</span>`;
+                            }
+                            return "";
+                        })()}
+
                         ${
                             reference
                                 ? `<span class="result-reference">${escapeHtml(reference)}</span>`
@@ -1447,7 +1460,7 @@ function initializeSearchEvents() {
 
 
 /* =========================================================
-   CATÁLOGO DE COMPONENTES v0.9.6.1
+   CATÁLOGO DE COMPONENTES v0.9.7
    ========================================================= */
 
 const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
