@@ -19,6 +19,7 @@ const API = {
     cableTagRecognize: "/cable-tags/recognize",
     componentRecognize: "/components/recognize",
     visionAnalyze: "/vision/analyze",
+    componentCatalog: "/component-catalog",
 };
 
 
@@ -62,6 +63,17 @@ const elements = {
     visionResultDetails: document.getElementById("visionResultDetails"),
     visionSearchButton: document.getElementById("visionSearchButton"),
     visionRetryButton: document.getElementById("visionRetryButton"),
+
+    componentOrganization: document.getElementById("componentOrganization"),
+    componentPlant: document.getElementById("componentPlant"),
+    componentSector: document.getElementById("componentSector"),
+    componentType: document.getElementById("componentType"),
+    componentQuery: document.getElementById("componentQuery"),
+    componentSummary: document.getElementById("componentSummary"),
+    componentsMessage: document.getElementById("componentsMessage"),
+    componentsLoading: document.getElementById("componentsLoading"),
+    componentsList: document.getElementById("componentsList"),
+    refreshComponentsButton: document.getElementById("refreshComponentsButton"),
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
@@ -112,6 +124,7 @@ const state = {
     plants: [],
     sectors: [],
     documents: [],
+    componentCatalog: [],
 
     search: {
         organizationId: null,
@@ -493,6 +506,8 @@ async function deleteOrganization(organizationId, organizationName, button) {
         });
 
         await loadOrganizations();
+    syncComponentOrganizations();
+    await loadComponentCatalog();
 
         showMessage(
             elements.organizationMessage,
@@ -1392,6 +1407,135 @@ function initializeSearchEvents() {
 }
 
 
+
+
+/* =========================================================
+   CATÁLOGO DE COMPONENTES v0.9.1
+   ========================================================= */
+
+const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
+
+function populateComponentTypeOptions() {
+    if (!elements.componentType) return;
+    elements.componentType.innerHTML = '<option value="">Todos</option>' + COMPONENT_TYPES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+}
+
+function syncComponentOrganizations() {
+    if (!elements.componentOrganization) return;
+    const selected = elements.componentOrganization.value;
+    elements.componentOrganization.innerHTML = '<option value="">Todas</option>' + state.organizations.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+    elements.componentOrganization.value = selected;
+}
+
+async function loadComponentPlants() {
+    const orgId = elements.componentOrganization?.value;
+    elements.componentPlant.innerHTML = '<option value="">Todas</option>';
+    elements.componentSector.innerHTML = '<option value="">Todos</option>';
+    elements.componentPlant.disabled = !orgId;
+    elements.componentSector.disabled = true;
+    if (!orgId) return loadComponentCatalog();
+    try {
+        const plants = await apiRequest(`${API.plants}?organization_id=${encodeURIComponent(orgId)}`);
+        elements.componentPlant.innerHTML += plants.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    } catch (_) {}
+    loadComponentCatalog();
+}
+
+async function loadComponentSectors() {
+    const plantId = elements.componentPlant?.value;
+    elements.componentSector.innerHTML = '<option value="">Todos</option>';
+    elements.componentSector.disabled = !plantId;
+    if (plantId) {
+        try {
+            const sectors = await apiRequest(`${API.sectors}?plant_id=${encodeURIComponent(plantId)}`);
+            elements.componentSector.innerHTML += sectors.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+        } catch (_) {}
+    }
+    loadComponentCatalog();
+}
+
+function renderComponentSummary(counts) {
+    if (!elements.componentSummary) return;
+    elements.componentSummary.innerHTML = Object.entries(counts || {}).map(([type,count]) => `<button type="button" class="component-chip" data-component-type="${escapeHtml(type)}">${escapeHtml(type)} · ${count}</button>`).join('');
+    elements.componentSummary.querySelectorAll('[data-component-type]').forEach(btn => btn.addEventListener('click', () => {
+        elements.componentType.value = btn.dataset.componentType;
+        loadComponentCatalog();
+    }));
+}
+
+function openComponentInSearch(item) {
+    document.querySelector('[data-section="searchSection"]')?.click();
+    elements.searchInput.value = item.reference || item.model || '';
+    elements.searchOrganization.value = String(item.organization_id || '');
+    elements.searchOrganization.dispatchEvent(new Event('change'));
+    setTimeout(() => {
+        elements.searchPlant.value = String(item.plant_id || '');
+        elements.searchPlant.dispatchEvent(new Event('change'));
+        setTimeout(() => {
+            elements.searchSector.value = String(item.sector_id || '');
+            elements.searchForm?.requestSubmit();
+        }, 350);
+    }, 350);
+}
+
+function renderComponentCatalog(items) {
+    state.componentCatalog = items || [];
+    if (!elements.componentsList) return;
+    if (!items?.length) {
+        elements.componentsList.innerHTML = '<div class="empty-state"><strong>No se encontraron componentes.</strong><p>Procesá un plano o cambiá los filtros.</p></div>';
+        return;
+    }
+    elements.componentsList.innerHTML = items.map((item,index) => `
+        <article class="component-catalog-card">
+            <div class="component-catalog-type">${escapeHtml(item.component_type || 'otro')}</div>
+            <h3>${escapeHtml(item.reference || item.model || 'Sin referencia')}</h3>
+            <div class="component-catalog-meta">
+                ${item.model ? `<strong>Modelo:</strong> ${escapeHtml(item.model)}<br>` : ''}
+                ${escapeHtml(item.organization_name)} · ${escapeHtml(item.plant_name)} · ${escapeHtml(item.sector_name)}<br>
+                ${escapeHtml(item.document_title)} · página ${item.page_number}
+            </div>
+            <div class="component-catalog-actions">
+                <button type="button" class="primary-button" data-open-component="${index}">Ver en plano</button>
+            </div>
+        </article>`).join('');
+    elements.componentsList.querySelectorAll('[data-open-component]').forEach(btn => btn.addEventListener('click', () => openComponentInSearch(state.componentCatalog[Number(btn.dataset.openComponent)])));
+}
+
+async function loadComponentCatalog() {
+    if (!elements.componentsList) return;
+    elements.componentsLoading?.classList.remove('hidden');
+    elements.componentsMessage?.classList.add('hidden');
+    const params = new URLSearchParams();
+    if (elements.componentOrganization?.value) params.set('organization_id', elements.componentOrganization.value);
+    if (elements.componentPlant?.value) params.set('plant_id', elements.componentPlant.value);
+    if (elements.componentSector?.value) params.set('sector_id', elements.componentSector.value);
+    if (elements.componentType?.value) params.set('component_type', elements.componentType.value);
+    if (elements.componentQuery?.value.trim()) params.set('q', elements.componentQuery.value.trim());
+    try {
+        const response = await apiRequest(`${API.componentCatalog}?${params.toString()}`);
+        renderComponentSummary(response.counts);
+        renderComponentCatalog(response.items);
+    } catch (error) {
+        elements.componentsList.innerHTML = '';
+        showMessage(elements.componentsMessage, error.message, 'error');
+    } finally {
+        elements.componentsLoading?.classList.add('hidden');
+    }
+}
+
+function initializeComponentCatalogEvents() {
+    populateComponentTypeOptions();
+    syncComponentOrganizations();
+    elements.componentOrganization?.addEventListener('change', loadComponentPlants);
+    elements.componentPlant?.addEventListener('change', loadComponentSectors);
+    elements.componentSector?.addEventListener('change', loadComponentCatalog);
+    elements.componentType?.addEventListener('change', loadComponentCatalog);
+    elements.refreshComponentsButton?.addEventListener('click', loadComponentCatalog);
+    let timer;
+    elements.componentQuery?.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(loadComponentCatalog, 350); });
+}
+
+
 /* =========================================================
    VISOR DE PLANOS Y ZOOM
    ========================================================= */
@@ -2207,6 +2351,7 @@ async function initializeApplication() {
     initializeNavigation();
     initializeHierarchyEvents();
     initializeSearchEvents();
+    initializeComponentCatalogEvents();
     initializeViewerEvents();
     initializeFileEvents();
     initializeDocumentEvents();

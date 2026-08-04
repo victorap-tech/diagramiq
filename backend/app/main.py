@@ -19,6 +19,7 @@ from app.routers import (
     cable_tags,
     components,
     vision,
+    component_catalog,
 )
 
 # Crear tablas solo si no existen
@@ -68,10 +69,10 @@ ensure_document_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.9.0",
+    version="0.9.1",
 )
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -107,6 +108,7 @@ app.include_router(references.router)
 app.include_router(cable_tags.router)
 app.include_router(components.router)
 app.include_router(vision.router)
+app.include_router(component_catalog.router)
 
 # ==========================
 # Frontend

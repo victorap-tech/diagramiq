@@ -1142,3 +1142,18 @@ textarea {
     .vision-actions button { flex: 1 1 100%; }
     .vision-result-details > div { grid-template-columns: 82px minmax(0,1fr); }
 }
+
+/* v0.9.1: catálogo persistente de componentes */
+.component-filter-grid { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
+.component-query { grid-column: span 2; }
+.component-summary { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.component-chip { border:1px solid #c9d8e7; background:#f5f9fd; border-radius:999px; padding:6px 10px; font-size:.82rem; cursor:pointer; }
+.component-chip.active { background:#dcecff; border-color:#7ba9d8; font-weight:800; }
+.component-catalog-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; margin-top:16px; }
+.component-catalog-card { background:#fff; border:1px solid #dbe5ef; border-radius:14px; padding:15px; box-shadow:0 4px 16px rgba(22,50,79,.06); }
+.component-catalog-card h3 { margin:4px 0 7px; font-size:1.08rem; }
+.component-catalog-type { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:#315f8d; font-weight:800; }
+.component-catalog-meta { color:#607080; font-size:.88rem; line-height:1.45; min-height:2.6em; }
+.component-catalog-actions { display:flex; gap:8px; margin-top:12px; }
+@media (max-width: 800px) { .component-filter-grid { grid-template-columns:1fr 1fr; } .component-query { grid-column:1/-1; } }
+@media (max-width: 520px) { .component-filter-grid { grid-template-columns:1fr; } .component-query { grid-column:auto; } }
