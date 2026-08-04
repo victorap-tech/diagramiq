@@ -17,6 +17,7 @@ const API = {
     documents: "/documents",
     search: "/search",
     cableTagRecognize: "/cable-tags/recognize",
+    componentRecognize: "/components/recognize",
 };
 
 
@@ -51,6 +52,8 @@ const elements = {
     searchResults: document.getElementById("searchResults"),
     cableTagPhoto: document.getElementById("cableTagPhoto"),
     cableTagStatus: document.getElementById("cableTagStatus"),
+    componentPhoto: document.getElementById("componentPhoto"),
+    componentPhotoStatus: document.getElementById("componentPhotoStatus"),
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
@@ -1262,9 +1265,58 @@ async function handleCableTagPhoto(event) {
     }
 }
 
+
+async function handleComponentPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const statusElement = elements.componentPhotoStatus;
+    if (statusElement) {
+        statusElement.textContent = "Analizando componente...";
+        statusElement.classList.remove("success", "error");
+    }
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+        const response = await apiRequest(API.componentRecognize, {
+            method: "POST",
+            body: formData,
+        });
+        const query = String(response?.search_query || "").trim();
+        if (!query) {
+            throw new Error(response?.message || "No se pudo identificar el componente.");
+        }
+
+        elements.searchInput.value = query;
+        const details = [
+            response?.component_type,
+            response?.brand,
+            response?.model,
+            response?.reference,
+        ].filter(Boolean).join(" · ");
+        const confidence = Number(response?.confidence || 0);
+        const confidenceText = confidence > 0 ? ` (${Math.round(confidence * 100)}%)` : "";
+        if (statusElement) {
+            statusElement.textContent = `Identificado: ${details || query}${confidenceText}. Buscando en los planos...`;
+            statusElement.classList.add("success");
+        }
+        elements.searchForm?.requestSubmit();
+    } catch (error) {
+        if (statusElement) {
+            statusElement.textContent = error.message;
+            statusElement.classList.add("error");
+        }
+    } finally {
+        event.target.value = "";
+    }
+}
+
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
+    elements.componentPhoto?.addEventListener("change", handleComponentPhoto);
 }
 
 

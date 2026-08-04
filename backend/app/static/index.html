@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.8.0"
+        href="/static/styles.css?v=0.8.1"
     >
 </head>
 
@@ -243,6 +243,18 @@
                     </label>
                     <input id="cableTagPhoto" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
                     <span id="cableTagStatus" class="tag-photo-status"></span>
+                </div>
+
+                <div class="tag-photo-card component-photo-card">
+                    <div>
+                        <strong>Reconocer componente por foto</strong>
+                        <p>Fotografiá la etiqueta frontal de un interruptor, contactor, módulo, PLC o variador. DiagramIQ identificará el tipo, marca, modelo y referencia.</p>
+                    </div>
+                    <label class="secondary-button tag-photo-button" for="componentPhoto">
+                        📷 Identificar componente
+                    </label>
+                    <input id="componentPhoto" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                    <span id="componentPhotoStatus" class="tag-photo-status"></span>
                 </div>
 
                 <form id="searchForm">
@@ -651,7 +663,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.7.5</span>
+        <span>DiagramIQ v0.8.1</span>
 
         <a
             href="/docs"
@@ -662,6 +674,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.8.0"></script>
+    <script src="/static/app.js?v=0.8.1"></script>
 </body>
 </html>

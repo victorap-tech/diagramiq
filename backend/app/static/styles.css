@@ -1103,3 +1103,8 @@ textarea {
     .tag-photo-button { width: 100%; text-align: center; }
     .tag-photo-status { grid-column: 1; }
 }
+
+/* v0.8.1: reconocimiento visual de componentes industriales */
+.component-photo-card {
+    margin-top: 12px;
+}

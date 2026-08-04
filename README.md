@@ -1,26 +1,18 @@
-# DiagramIQ
+# DiagramIQ v0.8.1
 
-Asistente inteligente para mantenimiento industrial.
+Incluye:
 
-## Objetivo
+- Búsqueda por foto del TAG de cable.
+- Reconocimiento por foto de interruptores, guardamotores, contactores, relés, fusibles, variadores, arrancadores suaves, PLC, módulos de E/S, fuentes, sensores, borneras y motores.
+- Extracción de tipo, referencia, marca, modelo y texto visible.
+- Búsqueda automática del dato reconocido dentro de los planos seleccionados.
+- Número de versión y caché actualizados a 0.8.1.
 
-DiagramIQ permite cargar diagramas eléctricos, manuales y procedimientos para ayudar a diagnosticar fallas rápidamente.
+## Railway
 
-También permite registrar asistencias, detectar problemas repetitivos y analizar el historial de mantenimiento.
+Configurar en Variables:
 
-## Tecnología inicial
+- `OPENAI_API_KEY`: clave de la API.
+- `OPENAI_VISION_MODEL`: opcional; por defecto `gpt-4.1-mini`.
 
-- FastAPI
-- PostgreSQL
-- SQLAlchemy
-- PyMuPDF
-- React
-- Railway
-
-## Ejecutar localmente
-
-Desde la carpeta `backend`:
-
-```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+La clave se usa únicamente en el backend.
