@@ -34,6 +34,25 @@ REFERENCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+def _cancel_requested(document_id: int, db: Session) -> bool:
+    """Consulta el estado fresco para permitir cancelación desde otra petición."""
+    db.expire_all()
+    status_value = db.query(models.Document.processing_status).filter(
+        models.Document.id == document_id
+    ).scalar()
+    return (status_value or "").lower() == "cancel_requested"
+
+
+def _mark_cancelled(document_id: int, db: Session, message: str) -> None:
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        return
+    document.processing_status = "cancelled"
+    document.processing_stage = "cancelled"
+    document.processing_message = message
+    db.commit()
+
+
 INVALID_REFERENCE_WORDS = {
     "DIESES", "PIEZA", "PIEZAS", "LISTA", "PLANO", "PAGINA", "PÁGINA",
     "INDICE", "ÍNDICE", "DOCUMENTO", "DESCRIPCION", "DESCRIPCIÓN",
@@ -189,6 +208,88 @@ def remove_existing_pages(
     db.flush()
 
 
+CATALOG_PAGE_KEYWORDS = (
+    "LISTA DE MEDIOS", "LISTA DE MATERIALES", "LISTA DE COMPONENTES",
+    "EQUIPMENT LIST", "PARTS LIST", "BILL OF MATERIAL", "BOM",
+    "ARTICULO", "ARTÍCULO", "FABRICANTE", "DESIGNACION", "DESIGNACIÓN",
+    "TIPO", "MODELO", "NUMERO DE PEDIDO", "NÚMERO DE PEDIDO",
+)
+
+CABLE_LIST_KEYWORDS = (
+    "LISTA DE CABLE", "LISTADO DE CABLE", "WIRE LIST", "CABLE LIST",
+    "LISTA DE HILOS", "TERMINAL PLAN", "BORNERA", "BORNEROS",
+)
+
+KNOWN_MANUFACTURERS = (
+    "SIEMENS", "SCHNEIDER", "DANFOSS", "ABB", "SEW", "SEW-EURODRIVE",
+    "ROCKWELL", "ALLEN-BRADLEY", "WEIDMULLER", "WEIDMÜLLER", "PHOENIX",
+    "WAGO", "OMRON", "MITSUBISHI", "SICK", "PEPPERL+FUCHS", "IFM",
+    "FESTO", "BURKERT", "BÜRKERT", "EATON", "MOELLER", "LEGRAND",
+)
+
+
+def classify_page_type(text: str) -> str:
+    """Clasifica la página antes de indexarla para separar listas y planos."""
+    upper = (text or "").upper()
+    catalog_hits = sum(1 for key in CATALOG_PAGE_KEYWORDS if key in upper)
+    cable_hits = sum(1 for key in CABLE_LIST_KEYWORDS if key in upper)
+    refs = extract_references(upper)
+    lines = [line.strip() for line in upper.splitlines() if line.strip()]
+    dense_rows = sum(1 for line in lines if len(extract_references(line)) >= 2)
+    if catalog_hits >= 2 or (catalog_hits >= 1 and dense_rows >= 4):
+        return "component_list"
+    if cable_hits >= 1 and (dense_rows >= 3 or len(refs) >= 25):
+        return "cable_list"
+    if len(refs) >= 70 and dense_rows >= 8:
+        return "list"
+    return "schematic"
+
+
+def _extract_manufacturer(row_text: str) -> str | None:
+    upper = (row_text or "").upper()
+    return next((name.title() for name in KNOWN_MANUFACTURERS if name in upper), None)
+
+
+def build_component_catalog(pdf: fitz.Document) -> dict[str, dict]:
+    """Primera etapa: usa listas/BOM como fuente maestra para enriquecer planos."""
+    catalog: dict[str, dict] = {}
+    for page_index in range(pdf.page_count):
+        page = pdf.load_page(page_index)
+        text = page.get_text("text") or ""
+        page_type = classify_page_type(text)
+        if page_type != "component_list":
+            continue
+        words = page.get_text("words")
+        rows: dict[int, list] = {}
+        for word in words:
+            key = round(((word[1] + word[3]) / 2) / 3) * 3
+            rows.setdefault(key, []).append(word)
+        for row in rows.values():
+            row.sort(key=lambda item: item[0])
+            row_text = " ".join(str(item[4]) for item in row).strip()
+            refs = extract_references(row_text)
+            if not refs:
+                continue
+            for reference in refs[:4]:
+                context = analyze_context_text(row_text, reference)
+                normalized = normalize_reference(reference)
+                existing = catalog.get(normalized, {})
+                candidate = {
+                    "reference": normalized,
+                    "description": context.get("description") or row_text,
+                    "detected_type": context.get("detected_type") or classify_reference(normalized),
+                    "model": context.get("model"),
+                    "manufacturer": _extract_manufacturer(row_text),
+                    "source_page": page_index + 1,
+                    "confidence": 100,
+                }
+                # Conserva la fila más rica si la referencia aparece varias veces.
+                old_score = sum(bool(existing.get(k)) for k in ("model", "manufacturer", "description", "detected_type"))
+                new_score = sum(bool(candidate.get(k)) for k in ("model", "manufacturer", "description", "detected_type"))
+                if not existing or new_score > old_score:
+                    catalog[normalized] = candidate
+    return catalog
+
 def analyze_context_text(row_text: str | None, search_text: str) -> dict:
     combined = (row_text or "").strip()
     upper = combined.upper()
@@ -234,6 +335,8 @@ def save_page_references(
     text_content: str,
     document_page: models.DocumentPage,
     db: Session,
+    component_catalog: dict[str, dict] | None = None,
+    page_type: str = "schematic",
 ) -> int:
     """
     Extrae las referencias y guarda cada aparición con
@@ -247,6 +350,7 @@ def save_page_references(
     page_words = page.get_text("words")
 
     for reference in references:
+        catalog_item = (component_catalog or {}).get(normalize_reference(reference))
         rectangles = find_reference_rectangles(
             page=page,
             reference=reference,
@@ -266,9 +370,12 @@ def save_page_references(
                 width=None,
                 height=None,
                 row_text=None,
-                description=None,
-                detected_type=None,
-                model=None,
+                description=(catalog_item or {}).get("description"),
+                detected_type=(catalog_item or {}).get("detected_type"),
+                model=(catalog_item or {}).get("model"),
+                manufacturer=(catalog_item or {}).get("manufacturer"),
+                source_kind="catalog" if catalog_item else page_type,
+                catalog_confidence=(catalog_item or {}).get("confidence", 0),
                 document_page_id=document_page.id,
             )
 
@@ -310,9 +417,12 @@ def save_page_references(
                 width=width,
                 height=height,
                 row_text=context["row_text"],
-                description=context["description"],
-                detected_type=context["detected_type"],
-                model=context["model"],
+                description=(catalog_item or {}).get("description") or context["description"],
+                detected_type=(catalog_item or {}).get("detected_type") or context["detected_type"],
+                model=(catalog_item or {}).get("model") or context["model"],
+                manufacturer=(catalog_item or {}).get("manufacturer"),
+                source_kind="catalog+plan" if catalog_item and page_type == "schematic" else page_type,
+                catalog_confidence=(catalog_item or {}).get("confidence", 0),
                 document_page_id=document_page.id,
             )
 
@@ -576,6 +686,15 @@ def process_pdf_document(
                 "El documento PDF no contiene páginas"
             )
 
+        document.processing_stage = "catalog"
+        document.processing_progress = 4
+        document.processing_message = "Leyendo listas de componentes"
+        db.commit()
+        component_catalog = build_component_catalog(pdf)
+        document.processing_message = f"Catálogo maestro: {len(component_catalog)} referencias"
+        document.processing_progress = 7
+        db.commit()
+
         matrix = fitz.Matrix(
             RENDER_SCALE,
             RENDER_SCALE,
@@ -584,6 +703,10 @@ def process_pdf_document(
         for page_index in range(
             pdf.page_count
         ):
+            if page_index % 5 == 0 and _cancel_requested(document.id, db):
+                _mark_cancelled(document.id, db, "Procesamiento cancelado por el usuario")
+                return processed_pages
+
             page = pdf.load_page(
                 page_index
             )
@@ -591,6 +714,7 @@ def process_pdf_document(
             text_content = (
                 page.get_text("text").strip()
             )
+            page_type = classify_page_type(text_content)
 
             image_filename = (
                 f"page_{page_index + 1:04d}.png"
@@ -616,6 +740,7 @@ def process_pdf_document(
                     text_content or None
                 ),
                 image_path=str(image_path),
+                page_type=page_type,
                 document_id=document.id,
             )
 
@@ -627,6 +752,8 @@ def process_pdf_document(
                 text_content=text_content,
                 document_page=new_page,
                 db=db,
+                component_catalog=component_catalog,
+                page_type=page_type,
             )
             term_count = save_page_search_terms(
                 page=page,
@@ -639,7 +766,7 @@ def process_pdf_document(
             document.detected_components = (document.detected_components or 0) + component_count
             document.detected_terms = (document.detected_terms or 0) + term_count
             document.processing_stage = "indexing"
-            document.processing_progress = min(88, 5 + round((processed_pages / pdf.page_count) * 83))
+            document.processing_progress = min(88, 8 + round((processed_pages / pdf.page_count) * 80))
             document.processing_message = f"Página {processed_pages} de {pdf.page_count}"
 
             # Mantiene las transacciones cortas para que SQLite no bloquee
@@ -655,9 +782,15 @@ def process_pdf_document(
         document.connection_status = "pending"
 
         db.commit()
+        if _cancel_requested(document.id, db):
+            _mark_cancelled(document.id, db, "Procesamiento cancelado antes de generar relaciones")
+            return processed_pages
         # Segunda etapa: precalcula relaciones una sola vez. Las búsquedas normales
         # siguen consultando el índice existente y no esperan este análisis.
         rebuild_document_connections(document.id, db)
+        if _cancel_requested(document.id, db):
+            _mark_cancelled(document.id, db, "Procesamiento cancelado por el usuario")
+            return processed_pages
         db.refresh(document)
         document.processing_status = "completed"
         document.processing_stage = "completed"

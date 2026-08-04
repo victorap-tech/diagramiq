@@ -45,6 +45,9 @@ def ensure_reference_columns() -> None:
         "description": "TEXT",
         "detected_type": "VARCHAR(100)",
         "model": "VARCHAR(150)",
+        "manufacturer": "VARCHAR(120)",
+        "source_kind": "VARCHAR(40)",
+        "catalog_confidence": "INTEGER NOT NULL DEFAULT 0",
     }
     with engine.begin() as connection:
         for name, definition in definitions.items():
@@ -53,6 +56,19 @@ def ensure_reference_columns() -> None:
 
 
 ensure_reference_columns()
+
+
+def ensure_page_columns() -> None:
+    inspector = inspect(engine)
+    if "document_pages" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("document_pages")}
+    with engine.begin() as connection:
+        if "page_type" not in existing:
+            connection.execute(text("ALTER TABLE document_pages ADD COLUMN page_type VARCHAR(40) DEFAULT 'unknown'"))
+
+
+ensure_page_columns()
 
 
 def ensure_document_columns() -> None:
@@ -110,10 +126,10 @@ ensure_processing_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.10.1",
+    version="0.10.3",
 )
 
-APP_VERSION = "0.10.1"
+APP_VERSION = "0.10.3"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent

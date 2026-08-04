@@ -47,3 +47,19 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 - Etapa actual, componentes, términos y relaciones detectadas.
 - Actualización automática cada 2 segundos mientras hay trabajos activos.
 - Botón Reindexar PDF sin volver a cargar el archivo.
+
+
+## v0.10.3 - Procesamiento seguro y PDFs sin duplicados
+- Relaciones filtradas y limitadas a evidencia técnica.
+- Botón Cancelar proceso con limpieza de relaciones parciales.
+- Barra estable: refresca sin ocultar ni desplazar la tabla.
+- Almacenamiento por SHA-256: el mismo PDF reutiliza la misma clave del Bucket y no crea copias nuevas tras un deploy.
+
+
+## v0.10.3 - Catálogo maestro desde listas
+
+- Clasifica páginas como plano, lista de componentes o lista de cables.
+- Lee primero las listas/BOM para construir un catálogo maestro.
+- Enriquece las apariciones del plano con tipo, modelo, fabricante y descripción.
+- Las listas ayudan a indexar, pero siguen quedando detrás de los planos en la búsqueda.
+- Muestra la etapa “Leyendo listas de componentes” en la barra de progreso.

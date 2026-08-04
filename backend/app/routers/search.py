@@ -58,6 +58,13 @@ def score_reference_result(item: models.ComponentReference, searched_reference: 
     else:
         score -= 25
 
+    if getattr(item, "catalog_confidence", 0):
+        score += min(22, round(item.catalog_confidence / 5))
+        reasons.append("validado_por_lista")
+    if getattr(item, "source_kind", "") == "component_list":
+        score -= 65
+        reasons.append("fuente_lista")
+
     if item.detected_type:
         score += 16
         reasons.append("tipo_detectado")
@@ -334,6 +341,9 @@ def serialize_reference(item: models.ComponentReference, query: str, ranking: di
         "description": item.description,
         "detected_type": item.detected_type,
         "model": item.model,
+        "manufacturer": getattr(item, "manufacturer", None),
+        "source_kind": getattr(item, "source_kind", None),
+        "catalog_confidence": getattr(item, "catalog_confidence", 0),
     }
     related = [
         ref for ref in extract_references(item.row_text or "")

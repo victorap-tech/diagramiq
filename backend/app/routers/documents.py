@@ -384,7 +384,7 @@ def upload_document(
         else None
     )
 
-    object_key = f"documents/{sector.plant.organization_id}/{sector.plant_id}/{sector.id}/{stored_filename}"
+    object_key = f"documents/{sector.plant.organization_id}/{sector.plant_id}/{sector.id}/{content_hash}.pdf"
     try:
         stored_path = upload_file(file_path, object_key)
     except Exception as exc:
@@ -515,6 +515,21 @@ def reindex_document(document_id: int, background_tasks: BackgroundTasks, db: Se
     db.commit()
     background_tasks.add_task(process_document_in_background, document.id)
     return {"message": "Reindexación iniciada", "document_id": document.id}
+
+
+@router.post("/{document_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+def cancel_document_processing(document_id: int, db: Session = Depends(get_db)):
+    """Solicita la cancelación segura del procesamiento en segundo plano."""
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    current = (document.processing_status or "").lower()
+    if current not in {"pending", "processing"}:
+        raise HTTPException(status_code=409, detail="El documento no se está procesando")
+    document.processing_status = "cancel_requested"
+    document.processing_message = "Cancelación solicitada"
+    db.commit()
+    return {"message": "Cancelación solicitada", "document_id": document.id}
 
 
 @router.post(

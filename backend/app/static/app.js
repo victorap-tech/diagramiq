@@ -2335,6 +2335,8 @@ function translateStatus(status) {
         uploaded: "Cargado",
         pending: "Pendiente",
         processing: "Procesando",
+        cancel_requested: "Cancelando",
+        cancelled: "Cancelado",
         completed: "Procesado",
         processed: "Procesado",
         error: "Error",
@@ -2453,6 +2455,12 @@ function renderDocuments(documents) {
                             type="button"
                             data-document-id="${escapeHtml(documentItem.id)}"
                         >${statusClass(status) === "completed" ? "Reindexar PDF" : "Procesar"}</button>
+                        ${["pending", "processing", "cancel_requested"].includes(String(status || "").toLowerCase()) ? `
+                        <button
+                            class="danger-button document-cancel-button"
+                            type="button"
+                            data-document-id="${escapeHtml(documentItem.id)}"
+                        >Cancelar proceso</button>` : ""}
                         <button
                             class="danger-button document-delete-button"
                             type="button"
@@ -2475,7 +2483,7 @@ async function loadDocuments() {
         const response = await apiRequest(API.documents);
         state.documents = toArray(response);
         renderDocuments(state.documents);
-        if (state.documents.some((item) => ["pending", "processing"].includes(String(item.processing_status || "").toLowerCase()))) startDocumentProgressPolling();
+        if (state.documents.some((item) => ["pending", "processing", "cancel_requested"].includes(String(item.processing_status || "").toLowerCase()))) startDocumentProgressPolling();
     } catch (error) {
         console.error("Error cargando documentos:", error);
 
@@ -2495,17 +2503,41 @@ let documentProgressTimer = null;
 function startDocumentProgressPolling() {
     if (documentProgressTimer) return;
     documentProgressTimer = setInterval(async () => {
-        const hasActive = state.documents.some((item) => ["pending", "processing"].includes(String(item.processing_status || "").toLowerCase()));
+        const hasActive = state.documents.some((item) => ["pending", "processing", "cancel_requested"].includes(String(item.processing_status || "").toLowerCase()));
         if (!hasActive) {
             clearInterval(documentProgressTimer);
             documentProgressTimer = null;
             return;
         }
-        await loadDocuments();
-    }, 2000);
+        try {
+            const response = await apiRequest(API.documents);
+            state.documents = toArray(response);
+            renderDocuments(state.documents);
+        } catch (error) {
+            console.error("No se pudo actualizar el progreso:", error);
+        }
+    }, 5000);
 }
 
 async function handleDocumentsListClick(event) {
+    const cancelButton = event.target.closest(".document-cancel-button");
+    if (cancelButton) {
+        const documentId = cancelButton.dataset.documentId;
+        if (!confirm("¿Cancelar el procesamiento de este PDF?")) return;
+        cancelButton.disabled = true;
+        cancelButton.textContent = "Cancelando...";
+        try {
+            const response = await apiRequest(`${API.documents}/${documentId}/cancel`, { method: "POST" });
+            showMessage(elements.documentsMessage, response?.message || "Cancelación solicitada.", "success");
+            startDocumentProgressPolling();
+        } catch (error) {
+            showMessage(elements.documentsMessage, `No se pudo cancelar: ${error.message}`, "error");
+            cancelButton.disabled = false;
+            cancelButton.textContent = "Cancelar proceso";
+        }
+        return;
+    }
+
     const processButton = event.target.closest(".document-reindex-button");
     if (processButton) {
         const documentId = processButton.dataset.documentId;

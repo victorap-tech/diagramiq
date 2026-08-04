@@ -184,6 +184,8 @@ class DocumentPage(Base):
         nullable=True,
     )
 
+    page_type = Column(String(40), nullable=True, default="unknown")
+
     document_id = Column(
         Integer,
         ForeignKey("documents.id"),
@@ -240,6 +242,9 @@ class ComponentReference(Base):
     description = Column(Text, nullable=True)
     detected_type = Column(String(100), nullable=True)
     model = Column(String(150), nullable=True)
+    manufacturer = Column(String(120), nullable=True)
+    source_kind = Column(String(40), nullable=True, default="plan")
+    catalog_confidence = Column(Integer, nullable=False, default=0)
 
     document_page_id = Column(
         Integer,
