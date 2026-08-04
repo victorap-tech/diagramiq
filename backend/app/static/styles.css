@@ -1205,3 +1205,19 @@ textarea {
 .result-priority-badge.primary { background:#e5f6eb; color:#176b36; border:1px solid #9bd2ad; }
 .result-priority-badge.list { background:#fff4dc; color:#825300; border:1px solid #e7c477; }
 .result-priority-badge.secondary { background:#eef2f6; color:#566474; border:1px solid #ccd5df; }
+
+/* v0.9.9: preguntas contextuales a la IA */
+.ai-question-card { margin-top: 18px; }
+.ai-question-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.ai-question-heading h3 { margin:4px 0 5px; }
+.ai-question-heading p { margin:0; color:#607080; }
+.ai-provider-badge { white-space:nowrap; padding:6px 10px; border-radius:999px; background:#eef5fc; border:1px solid #c9dced; color:#315f8d; font-size:.78rem; font-weight:800; text-transform:capitalize; }
+#aiQuestionInput { width:100%; resize:vertical; min-height:92px; }
+.ai-question-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:10px; }
+.ai-question-actions small { color:#687787; }
+.ai-answer { margin-top:14px; border:1px solid #cbddec; border-radius:14px; background:#f8fbfe; padding:16px; }
+.ai-answer-text { line-height:1.58; color:#243447; }
+.ai-source-list { margin-top:16px; padding-top:13px; border-top:1px solid #d8e4ef; display:grid; gap:7px; }
+.ai-source-item { display:grid; grid-template-columns:auto 1fr; gap:8px; font-size:.86rem; color:#566878; }
+.ai-source-item span { font-weight:800; color:#315f8d; }
+@media (max-width:640px) { .ai-question-heading { flex-direction:column; } .ai-question-actions button { width:100%; } }

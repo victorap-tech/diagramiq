@@ -165,3 +165,72 @@ def provider_status() -> dict:
         else os.getenv("OPENAI_API_KEY", "").strip()
     )
     return {"provider": provider, "configured": configured}
+
+
+def _call_openai_text(prompt: str, max_tokens: int) -> VisionResponse:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(503, "Falta configurar OPENAI_API_KEY en Railway.")
+    model = os.getenv("OPENAI_TEXT_MODEL", os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")).strip() or "gpt-4.1-mini"
+    body = json.dumps({
+        "model": model,
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+        "max_output_tokens": max_tokens,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=55) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(502, f"OpenAI no pudo responder: {_http_error_detail(exc)}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(504, "OpenAI tardó demasiado o no respondió.") from exc
+    text = _extract_openai_text(payload)
+    if not text:
+        raise HTTPException(502, "OpenAI respondió sin texto utilizable.")
+    return VisionResponse(text=text, provider="openai", model=model)
+
+
+def _call_anthropic_text(prompt: str, max_tokens: int) -> VisionResponse:
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(503, "Falta configurar ANTHROPIC_API_KEY en Railway.")
+    model = os.getenv("ANTHROPIC_TEXT_MODEL", os.getenv("ANTHROPIC_VISION_MODEL", "claude-sonnet-5")).strip() or "claude-sonnet-5"
+    body = json.dumps({
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=55) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(502, f"Anthropic no pudo responder: {_http_error_detail(exc)}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(504, "Anthropic tardó demasiado o no respondió.") from exc
+    text = _extract_anthropic_text(payload)
+    if not text:
+        raise HTTPException(502, "Anthropic respondió sin texto utilizable.")
+    return VisionResponse(text=text, provider="anthropic", model=model)
+
+
+def ask_text(prompt: str, max_tokens: int = 900) -> VisionResponse:
+    provider = _selected_provider()
+    if provider == "anthropic":
+        return _call_anthropic_text(prompt, max_tokens)
+    return _call_openai_text(prompt, max_tokens)

@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.9.1"
+        href="/static/styles.css?v=0.9.9"
     >
 </head>
 
@@ -337,6 +337,26 @@
                         </button>
                     </div>
                 </form>
+            </div>
+
+            <div class="card ai-question-card">
+                <div class="ai-question-heading">
+                    <div>
+                        <span class="section-label">Asistente contextual</span>
+                        <h3>Preguntar a DiagramIQ</h3>
+                        <p>La IA buscará primero información en los planos y manuales del sector seleccionado.</p>
+                    </div>
+                    <span id="aiProviderBadge" class="ai-provider-badge">IA</span>
+                </div>
+                <form id="aiQuestionForm">
+                    <textarea id="aiQuestionInput" rows="3" maxlength="1500" placeholder="Ejemplo: ¿Qué protege FC041 y en qué página aparece?" required></textarea>
+                    <div class="ai-question-actions">
+                        <button id="aiQuestionButton" class="primary-button" type="submit">🤖 Preguntar</button>
+                        <small>La respuesta se basa en el contenido ya indexado.</small>
+                    </div>
+                </form>
+                <div id="aiQuestionStatus" class="vision-status"></div>
+                <div id="aiAnswer" class="ai-answer hidden" aria-live="polite"></div>
             </div>
 
             <div
@@ -724,7 +744,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.9.8</span>
+        <span>DiagramIQ v0.9.9</span>
 
         <a
             href="/docs"
@@ -735,6 +755,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.9.8"></script>
+    <script src="/static/app.js?v=0.9.9"></script>
 </body>
 </html>

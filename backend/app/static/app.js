@@ -21,6 +21,7 @@ const API = {
     visionAnalyze: "/vision/analyze",
     componentCatalog: "/component-catalog",
     componentRelations: "/component-relations",
+    assistantAsk: "/assistant/ask",
 };
 
 
@@ -65,6 +66,12 @@ const elements = {
     visionSearchButton: document.getElementById("visionSearchButton"),
     visionCircuitButton: document.getElementById("visionCircuitButton"),
     visionRetryButton: document.getElementById("visionRetryButton"),
+    aiQuestionForm: document.getElementById("aiQuestionForm"),
+    aiQuestionInput: document.getElementById("aiQuestionInput"),
+    aiQuestionButton: document.getElementById("aiQuestionButton"),
+    aiQuestionStatus: document.getElementById("aiQuestionStatus"),
+    aiAnswer: document.getElementById("aiAnswer"),
+    aiProviderBadge: document.getElementById("aiProviderBadge"),
 
     componentOrganization: document.getElementById("componentOrganization"),
     componentPlant: document.getElementById("componentPlant"),
@@ -1446,6 +1453,71 @@ function retryVisionPhoto() {
     elements.visionPhoto?.click();
 }
 
+
+function renderAiAnswer(response) {
+    if (!elements.aiAnswer) return;
+    const answer = escapeHtml(String(response?.answer || "")).replace(/\n/g, "<br>");
+    const sources = Array.isArray(response?.sources) ? response.sources : [];
+    const sourceHtml = sources.length
+        ? `<div class="ai-source-list"><strong>Fuentes consultadas</strong>${sources.map((source, index) => `
+            <div class="ai-source-item">
+                <span>[Fuente ${index + 1}]</span>
+                <div>${escapeHtml(source.document_title || "Documento")} · página ${escapeHtml(String(source.page_number || "-"))}${source.reference ? ` · ${escapeHtml(source.reference)}` : ""}</div>
+            </div>`).join("")}</div>`
+        : "";
+    elements.aiAnswer.innerHTML = `<div class="ai-answer-text">${answer}</div>${sourceHtml}`;
+    elements.aiAnswer.classList.remove("hidden");
+    if (elements.aiProviderBadge) {
+        elements.aiProviderBadge.textContent = `${response?.provider || "IA"} · ${response?.model || ""}`;
+    }
+}
+
+async function handleAiQuestion(event) {
+    event.preventDefault();
+    const question = String(elements.aiQuestionInput?.value || "").trim();
+    if (question.length < 3) return;
+
+    const sectorId = selectedNumericValue(elements.searchSector);
+    if (!sectorId) {
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = "Seleccioná empresa, planta y sector antes de preguntar.";
+            elements.aiQuestionStatus.className = "vision-status error";
+        }
+        return;
+    }
+
+    elements.aiQuestionButton.disabled = true;
+    elements.aiAnswer?.classList.add("hidden");
+    if (elements.aiQuestionStatus) {
+        elements.aiQuestionStatus.textContent = "Buscando contexto en los documentos y consultando a la IA...";
+        elements.aiQuestionStatus.className = "vision-status loading";
+    }
+
+    try {
+        const response = await apiRequest(API.assistantAsk, {
+            method: "POST",
+            body: JSON.stringify({
+                question,
+                organization_id: selectedNumericValue(elements.searchOrganization),
+                plant_id: selectedNumericValue(elements.searchPlant),
+                sector_id: sectorId,
+            }),
+        });
+        renderAiAnswer(response);
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = `Respuesta basada en ${response?.context_count || 0} fuente(s) indexada(s).`;
+            elements.aiQuestionStatus.className = "vision-status success";
+        }
+    } catch (error) {
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = error.message;
+            elements.aiQuestionStatus.className = "vision-status error";
+        }
+    } finally {
+        elements.aiQuestionButton.disabled = false;
+    }
+}
+
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
@@ -1454,6 +1526,7 @@ function initializeSearchEvents() {
     elements.visionSearchButton?.addEventListener("click", searchLastVisionResult);
     elements.visionCircuitButton?.addEventListener("click", followLastVisionCircuit);
     elements.visionRetryButton?.addEventListener("click", retryVisionPhoto);
+    elements.aiQuestionForm?.addEventListener("submit", handleAiQuestion);
 }
 
 
