@@ -1069,3 +1069,37 @@ textarea {
         flex: 1 1 auto;
     }
 }
+
+/* v0.8.0: búsqueda mediante foto del TAG de cable */
+.tag-photo-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 16px;
+    margin: 18px 0;
+    padding: 14px;
+    border: 1px dashed #9fb5cf;
+    border-radius: 12px;
+    background: #f6f9fc;
+}
+.tag-photo-card p { margin: 4px 0 0; color: var(--muted-text, #5f6b7a); }
+.tag-photo-button { cursor: pointer; white-space: nowrap; }
+.tag-photo-status { grid-column: 1 / -1; min-height: 1.2em; font-size: .9rem; }
+.tag-photo-status.success { color: #18794e; font-weight: 700; }
+.tag-photo-status.error { color: var(--danger, #b42318); font-weight: 700; }
+.visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+@media (max-width: 640px) {
+    .tag-photo-card { grid-template-columns: 1fr; }
+    .tag-photo-button { width: 100%; text-align: center; }
+    .tag-photo-status { grid-column: 1; }
+}

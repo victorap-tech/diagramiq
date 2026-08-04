@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.7.5"
+        href="/static/styles.css?v=0.8.0"
     >
 </head>
 
@@ -231,6 +231,18 @@
                             </option>
                         </select>
                     </div>
+                </div>
+
+                <div class="tag-photo-card">
+                    <div>
+                        <strong>Buscar por foto del TAG de cable</strong>
+                        <p>Sacá una foto cercana de la etiqueta. DiagramIQ leerá el código y lo buscará en los planos.</p>
+                    </div>
+                    <label class="secondary-button tag-photo-button" for="cableTagPhoto">
+                        📷 Sacar foto
+                    </label>
+                    <input id="cableTagPhoto" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                    <span id="cableTagStatus" class="tag-photo-status"></span>
                 </div>
 
                 <form id="searchForm">
@@ -650,6 +662,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.7.5"></script>
+    <script src="/static/app.js?v=0.8.0"></script>
 </body>
 </html>

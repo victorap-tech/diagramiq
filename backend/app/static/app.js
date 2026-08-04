@@ -16,6 +16,7 @@ const API = {
     sectors: "/sectors",
     documents: "/documents",
     search: "/search",
+    cableTagRecognize: "/cable-tags/recognize",
 };
 
 
@@ -48,6 +49,8 @@ const elements = {
     searchMessage: document.getElementById("searchMessage"),
     searchLoading: document.getElementById("searchLoading"),
     searchResults: document.getElementById("searchResults"),
+    cableTagPhoto: document.getElementById("cableTagPhoto"),
+    cableTagStatus: document.getElementById("cableTagStatus"),
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
@@ -1216,8 +1219,52 @@ async function handleSearchSubmit(event) {
 }
 
 
+async function handleCableTagPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (elements.cableTagStatus) {
+        elements.cableTagStatus.textContent = "Leyendo TAG...";
+        elements.cableTagStatus.classList.remove("success", "error");
+    }
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+        const response = await apiRequest(API.cableTagRecognize, {
+            method: "POST",
+            body: formData,
+        });
+
+        const tag = String(response?.tag || "").trim();
+        if (!tag) {
+            throw new Error(response?.message || "No se pudo reconocer el TAG.");
+        }
+
+        elements.searchInput.value = tag;
+        if (elements.cableTagStatus) {
+            const confidence = Number(response?.confidence || 0);
+            const confidenceText = confidence > 0
+                ? ` (${Math.round(confidence * 100)}% de confianza)`
+                : "";
+            elements.cableTagStatus.textContent = `TAG leído: ${tag}${confidenceText}`;
+            elements.cableTagStatus.classList.add("success");
+        }
+        elements.searchForm?.requestSubmit();
+    } catch (error) {
+        if (elements.cableTagStatus) {
+            elements.cableTagStatus.textContent = error.message;
+            elements.cableTagStatus.classList.add("error");
+        }
+    } finally {
+        event.target.value = "";
+    }
+}
+
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
+    elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
 }
 
 
