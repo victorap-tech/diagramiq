@@ -1551,6 +1551,38 @@ function updateUploadProgress(percent, text) {
 }
 
 
+async function resolveCurrentOrganizationId(selectedId) {
+    const normalizedSelectedId = normalizeId(selectedId);
+    const selectedOption = elements.uploadOrganization?.selectedOptions?.[0];
+    const selectedName = selectedOption?.textContent?.trim().toLowerCase() || "";
+
+    const response = await apiRequest(API.organizations);
+    const organizations = toArray(response);
+    state.organizations = organizations;
+
+    let organization = organizations.find(
+        (item) => normalizeId(getObjectId(item)) === normalizedSelectedId
+    );
+
+    // Si Railway conservó un ID viejo en el navegador, recupera la empresa
+    // por su nombre visible y usa el ID actual de la base de datos.
+    if (!organization && selectedName) {
+        organization = organizations.find(
+            (item) => getObjectName(item).trim().toLowerCase() === selectedName
+        );
+    }
+
+    if (!organization) {
+        throw new Error(
+            "La empresa seleccionada ya no coincide con la base de datos. " +
+            "Volvé a seleccionarla e intentá nuevamente."
+        );
+    }
+
+    return normalizeId(getObjectId(organization));
+}
+
+
 async function createPlantIfNeeded(organizationId, plantName) {
     const trimmedName = plantName.trim();
 
@@ -1633,7 +1665,7 @@ async function handleUploadSubmit(event) {
     event.preventDefault();
     hideMessage(elements.uploadMessage);
 
-    const organizationId = elements.uploadOrganization?.value;
+    let organizationId = elements.uploadOrganization?.value;
     let plantId = elements.uploadPlant?.value;
     const newPlantName = elements.newPlantName?.value.trim() ?? "";
     let sectorId = elements.uploadSector?.value;
@@ -1656,7 +1688,11 @@ async function handleUploadSubmit(event) {
         validatePdfFile(file);
 
         setUploadLoading(true);
-        updateUploadProgress(10, "Preparando documento...");
+        updateUploadProgress(10, "Validando empresa...");
+
+        organizationId = await resolveCurrentOrganizationId(organizationId);
+
+        updateUploadProgress(15, "Preparando documento...");
 
         if (!plantId && newPlantName) {
             updateUploadProgress(20, "Creando planta...");
