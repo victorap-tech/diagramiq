@@ -1,3 +1,15 @@
+# DiagramIQ v0.9.3
+
+## Novedad: grafo preliminar de conexiones
+
+- Botón **Ver grafo** en el catálogo de componentes.
+- Recorre relaciones fuertes entre componentes hasta 2 niveles.
+- Une la misma referencia cuando aparece en distintas páginas del mismo documento.
+- Permite tocar cada nodo para buscarlo directamente en los planos.
+- Conserva Vision, catálogo y relaciones de v0.9.2.
+
+> Las relaciones son preliminares y deben verificarse visualmente antes de una intervención eléctrica.
+
 # DiagramIQ v0.9.0
 
 Incluye:

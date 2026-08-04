@@ -126,3 +126,130 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
         "relations": relations[:20],
         "note": "Relaciones preliminares inferidas por referencias cruzadas y proximidad en la misma página. Deben verificarse en el plano.",
     }
+
+
+def _node_payload(ref):
+    page = ref.document_page
+    doc = page.document
+    ref_type = infer_type(ref.reference, ref.detected_type, ref.component_type)
+    return {
+        "id": ref.id,
+        "reference": ref.reference or ref.model or f"Componente {ref.id}",
+        "component_type": ref_type,
+        "model": ref.model or "",
+        "document_id": doc.id,
+        "document_title": doc.title,
+        "page_number": page.page_number,
+        "x": ref.x,
+        "y": ref.y,
+        "width": ref.width,
+        "height": ref.height,
+    }
+
+
+def _candidate_edges(source, db: Session):
+    source_type = infer_type(source.reference, source.detected_type, source.component_type)
+    source_text = " ".join(filter(None, [source.row_text, source.description])).upper()
+    refs = (
+        db.query(models.ComponentReference)
+        .filter(models.ComponentReference.document_page_id == source.document_page_id)
+        .filter(models.ComponentReference.id != source.id)
+        .all()
+    )
+    edges = []
+    for ref in refs:
+        target_type = infer_type(ref.reference, ref.detected_type, ref.component_type)
+        dist = _distance(source, ref)
+        mentioned = bool(ref.reference and re.search(rf"(?<![A-Z0-9]){re.escape(ref.reference.upper())}(?![A-Z0-9])", source_text))
+        reverse_text = " ".join(filter(None, [ref.row_text, ref.description])).upper()
+        reverse_mentioned = bool(source.reference and re.search(rf"(?<![A-Z0-9]){re.escape(source.reference.upper())}(?![A-Z0-9])", reverse_text))
+        score = 0
+        reasons = []
+        if mentioned or reverse_mentioned:
+            score += 70
+            reasons.append("referencia cruzada")
+        if dist is not None:
+            if dist <= 180:
+                score += 35
+                reasons.append("muy próximo")
+            elif dist <= 400:
+                score += 20
+                reasons.append("próximo")
+            elif dist <= 800:
+                score += 8
+        if source_type != "otro" and target_type != "otro":
+            score += 5
+        if score >= 20:
+            edges.append((ref, min(score, 99), _relation_hint(source_type, target_type), ", ".join(reasons) or "misma página"))
+    edges.sort(key=lambda row: -row[1])
+    return edges[:8]
+
+
+@router.get("/{reference_id}/graph")
+def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends(get_db)):
+    """Construye un grafo preliminar navegable desde un componente.
+
+    Recorre relaciones fuertes en la misma página y une apariciones de la misma
+    referencia en otras páginas del mismo documento. depth se limita a 1..3.
+    """
+    depth = max(1, min(depth, 3))
+    root = db.query(models.ComponentReference).filter(models.ComponentReference.id == reference_id).first()
+    if not root:
+        raise HTTPException(status_code=404, detail="Componente no encontrado")
+
+    nodes = {root.id: _node_payload(root)}
+    edges = []
+    queue = [(root, 0)]
+    visited = set()
+
+    while queue:
+        current, level = queue.pop(0)
+        if current.id in visited or level >= depth:
+            continue
+        visited.add(current.id)
+
+        for target, confidence, relation, reason in _candidate_edges(current, db):
+            nodes.setdefault(target.id, _node_payload(target))
+            edges.append({
+                "source": current.id,
+                "target": target.id,
+                "confidence": confidence,
+                "relation": relation,
+                "reason": reason,
+                "cross_page": False,
+            })
+            if confidence >= 40:
+                queue.append((target, level + 1))
+
+        normalized = (current.normalized_reference or current.reference or "").strip().upper()
+        if normalized:
+            page = current.document_page
+            same_refs = (
+                db.query(models.ComponentReference)
+                .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
+                .filter(models.DocumentPage.document_id == page.document_id)
+                .filter(models.ComponentReference.id != current.id)
+                .filter(models.ComponentReference.normalized_reference == normalized)
+                .limit(6)
+                .all()
+            )
+            for target in same_refs:
+                nodes.setdefault(target.id, _node_payload(target))
+                if not any(e["source"] == current.id and e["target"] == target.id for e in edges):
+                    edges.append({
+                        "source": current.id,
+                        "target": target.id,
+                        "confidence": 95,
+                        "relation": "misma referencia en otra página",
+                        "reason": "continuidad por referencia exacta",
+                        "cross_page": True,
+                    })
+                    queue.append((target, level + 1))
+
+    return {
+        "root_id": root.id,
+        "depth": depth,
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "note": "Grafo preliminar generado por referencias exactas, referencias cruzadas y proximidad. Confirmar siempre sobre el plano antes de intervenir.",
+    }
