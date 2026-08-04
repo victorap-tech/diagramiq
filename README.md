@@ -1,11 +1,14 @@
-# DiagramIQ v0.9.5
+# DiagramIQ v0.9.6
 
-Base: v0.9.4 estable.
+Base: v0.9.5 estable.
 
-## Cambio principal
+## Cambio principal: motor de relaciones precalculadas
 
-- DiagramIQ Vision ahora permite pasar directamente de una foto de componente a **Seguir circuito**.
-- Busca la referencia o el modelo reconocido dentro del catálogo de la empresa, planta y sector seleccionados.
-- Si encuentra el componente, abre el recorrido de origen y destino existente.
-- Mantiene la búsqueda manual cuando la referencia todavía no fue indexada.
-- Actualiza la versión visible y la API a 0.9.5.
+- Durante la indexación del PDF crea un índice persistente de conexiones.
+- Guarda relaciones por referencia cruzada, proximidad y continuidad entre páginas.
+- `Seguir circuito` consulta ese índice y no vuelve a analizar el PDF en cada búsqueda.
+- Mantiene compatibilidad con documentos anteriores: si aún no tienen índice, usa el método anterior.
+- Agrega estado y cantidad de conexiones por documento en la base de datos.
+- No cambia el flujo de búsqueda ni agrega demoras a las consultas normales.
+
+Versión visible y API: 0.9.6.

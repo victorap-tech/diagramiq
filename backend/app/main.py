@@ -67,13 +67,29 @@ def ensure_document_columns() -> None:
 
 ensure_document_columns()
 
+
+def ensure_connection_columns() -> None:
+    """Mantiene compatible la base existente sin borrar documentos."""
+    inspector = inspect(engine)
+    if "documents" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("documents")}
+    with engine.begin() as connection:
+        if "connection_status" not in existing:
+            connection.execute(text("ALTER TABLE documents ADD COLUMN connection_status VARCHAR(50) NOT NULL DEFAULT 'pending'"))
+        if "connection_count" not in existing:
+            connection.execute(text("ALTER TABLE documents ADD COLUMN connection_count INTEGER NOT NULL DEFAULT 0"))
+
+
+ensure_connection_columns()
+
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.9.5",
+    version="0.9.6",
 )
 
-APP_VERSION = "0.9.5"
+APP_VERSION = "0.9.6"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent

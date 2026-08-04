@@ -126,6 +126,8 @@ class Document(Base):
         nullable=False,
         default="uploaded",
     )
+    connection_status = Column(String(50), nullable=False, default="pending")
+    connection_count = Column(Integer, nullable=False, default=0)
     sector_id = Column(
         Integer,
         ForeignKey("sectors.id"),
@@ -268,3 +270,23 @@ class PageSearchTerm(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     document_page = relationship("DocumentPage", back_populates="search_terms")
+
+
+class ComponentConnection(Base):
+    """Relación precalculada entre referencias de un mismo documento.
+
+    Se genera durante la indexación para que "Seguir circuito" no tenga que
+    volver a analizar las páginas en cada consulta.
+    """
+    __tablename__ = "component_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    source_reference_id = Column(Integer, ForeignKey("component_references.id"), nullable=False, index=True)
+    target_reference_id = Column(Integer, ForeignKey("component_references.id"), nullable=False, index=True)
+    relation_type = Column(String(120), nullable=False, default="posible relación")
+    direction = Column(String(30), nullable=False, default="unknown")
+    confidence = Column(Integer, nullable=False, default=0)
+    reason = Column(Text, nullable=True)
+    cross_page = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

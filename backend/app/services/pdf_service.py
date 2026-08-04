@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.services.storage_service import resolve_local_file
+from app.services.connection_indexer import rebuild_document_connections
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -611,8 +612,12 @@ def process_pdf_document(
 
         document.processing_status = "completed"
         document.page_count = pdf.page_count
+        document.connection_status = "pending"
 
         db.commit()
+        # Segunda etapa: precalcula relaciones una sola vez. Las búsquedas normales
+        # siguen consultando el índice existente y no esperan este análisis.
+        rebuild_document_connections(document.id, db)
         db.refresh(document)
 
         return processed_pages
@@ -631,6 +636,7 @@ def process_pdf_document(
 
         if document_db is not None:
             document_db.processing_status = "error"
+            document_db.connection_status = "error"
             db.commit()
 
         raise

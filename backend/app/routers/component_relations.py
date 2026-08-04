@@ -55,6 +55,25 @@ def _relation_hint(source_type: str, target_type: str) -> str:
     return known.get(pair) or known.get((target_type, source_type)) or "posible relación por proximidad"
 
 
+def _indexed_edges(reference_id: int, db: Session):
+    rows = (
+        db.query(models.ComponentConnection)
+        .filter(
+            (models.ComponentConnection.source_reference_id == reference_id)
+            | (models.ComponentConnection.target_reference_id == reference_id)
+        )
+        .order_by(models.ComponentConnection.confidence.desc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        target_id = row.target_reference_id if row.source_reference_id == reference_id else row.source_reference_id
+        target = db.query(models.ComponentReference).filter(models.ComponentReference.id == target_id).first()
+        if target is not None:
+            result.append((row, target))
+    return result
+
+
 @router.get("/{reference_id}")
 def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
     source = db.query(models.ComponentReference).filter(models.ComponentReference.id == reference_id).first()
@@ -63,6 +82,35 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
 
     page = source.document_page
     source_type = infer_type(source.reference, source.detected_type, source.component_type)
+    indexed = _indexed_edges(source.id, db)
+    if indexed:
+        doc = page.document
+        relations = []
+        for edge, ref in indexed[:20]:
+            relations.append({
+                "id": ref.id,
+                "reference": ref.reference,
+                "component_type": infer_type(ref.reference, ref.detected_type, ref.component_type),
+                "model": ref.model or "",
+                "description": ref.description or ref.row_text or "",
+                "distance": _distance(source, ref),
+                "confidence": edge.confidence,
+                "relation": edge.relation_type,
+                "reason": edge.reason or "relación indexada",
+                "x": ref.x, "y": ref.y, "width": ref.width, "height": ref.height,
+            })
+        return {
+            "source": {
+                "id": source.id, "reference": source.reference,
+                "component_type": source_type, "model": source.model or "",
+                "role": PREFIX_ROLE.get(source_type, "componente"),
+                "document_id": doc.id, "document_title": doc.title,
+                "page_number": page.page_number,
+            },
+            "relations": relations,
+            "indexed": True,
+            "note": "Relaciones precalculadas durante la indexación; la consulta no vuelve a analizar el PDF.",
+        }
     refs = (
         db.query(models.ComponentReference)
         .filter(models.ComponentReference.document_page_id == source.document_page_id)
@@ -211,6 +259,37 @@ def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends
     root = db.query(models.ComponentReference).filter(models.ComponentReference.id == reference_id).first()
     if not root:
         raise HTTPException(status_code=404, detail="Componente no encontrado")
+
+    indexed_root = _indexed_edges(root.id, db)
+    if indexed_root:
+        nodes = {root.id: _node_payload(root)}
+        edges = []
+        queue = [(root.id, 0)]
+        visited = set()
+        while queue:
+            current_id, level = queue.pop(0)
+            if current_id in visited or level >= depth:
+                continue
+            visited.add(current_id)
+            for edge, target in _indexed_edges(current_id, db):
+                nodes.setdefault(target.id, _node_payload(target))
+                actual_direction = edge.direction
+                if edge.target_reference_id == current_id:
+                    actual_direction = "upstream" if edge.direction == "downstream" else "downstream" if edge.direction == "upstream" else "unknown"
+                edges.append({
+                    "source": current_id, "target": target.id,
+                    "direction": actual_direction, "confidence": edge.confidence,
+                    "relation": edge.relation_type, "reason": edge.reason or "relación indexada",
+                    "cross_page": bool(edge.cross_page),
+                })
+                if edge.confidence >= 40:
+                    queue.append((target.id, level + 1))
+        return {
+            "root_id": root.id, "depth": depth,
+            "nodes": list(nodes.values()), "edges": edges,
+            "indexed": True,
+            "note": "Seguimiento servido desde el índice de conexiones precalculado.",
+        }
 
     nodes = {root.id: _node_payload(root)}
     edges = []
