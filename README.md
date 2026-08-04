@@ -1,11 +1,11 @@
-# DiagramIQ v0.9.4
+# DiagramIQ v0.9.5
 
-## Novedad: Seguir circuito
+Base: v0.9.4 estable.
 
-- Reemplaza el botón **Ver grafo** por **Seguir circuito**.
-- Separa las relaciones detectadas en **Origen / alimentación** y **Destino / carga**.
-- Mantiene la navegación tocando cualquier componente del recorrido.
-- Conserva Vision, catálogo de componentes y relaciones preliminares.
-- Actualiza la versión visible y la API a 0.9.4.
+## Cambio principal
 
-> El seguimiento sigue siendo preliminar: se infiere mediante referencias exactas, referencias cruzadas y proximidad. Confirmar siempre en el plano antes de intervenir.
+- DiagramIQ Vision ahora permite pasar directamente de una foto de componente a **Seguir circuito**.
+- Busca la referencia o el modelo reconocido dentro del catálogo de la empresa, planta y sector seleccionados.
+- Si encuentra el componente, abre el recorrido de origen y destino existente.
+- Mantiene la búsqueda manual cuando la referencia todavía no fue indexada.
+- Actualiza la versión visible y la API a 0.9.5.

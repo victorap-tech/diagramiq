@@ -63,6 +63,7 @@ const elements = {
     visionResultTitle: document.getElementById("visionResultTitle"),
     visionResultDetails: document.getElementById("visionResultDetails"),
     visionSearchButton: document.getElementById("visionSearchButton"),
+    visionCircuitButton: document.getElementById("visionCircuitButton"),
     visionRetryButton: document.getElementById("visionRetryButton"),
 
     componentOrganization: document.getElementById("componentOrganization"),
@@ -1338,6 +1339,7 @@ async function handleComponentPhoto(event) {
 }
 
 let lastVisionQuery = "";
+let lastVisionResult = null;
 
 function visionKindLabel(kind) {
     return ({ cable_tag: "TAG de cable", component: "Componente", document: "Plano o documento", unknown: "Elemento" })[kind] || "Elemento";
@@ -1347,6 +1349,8 @@ async function handleVisionPhoto(event) {
     const file = event.target.files?.[0];
     if (!file) return;
     lastVisionQuery = "";
+    lastVisionResult = null;
+    if (elements.visionCircuitButton) elements.visionCircuitButton.disabled = true;
     elements.visionResult?.classList.add("hidden");
     if (elements.visionStatus) {
         elements.visionStatus.textContent = "Analizando foto...";
@@ -1357,6 +1361,7 @@ async function handleVisionPhoto(event) {
     try {
         const response = await apiRequest(API.visionAnalyze, { method: "POST", body: formData });
         lastVisionQuery = String(response?.search_query || "").trim();
+        lastVisionResult = response;
         const confidence = Number(response?.confidence || 0);
         const titleParts = [visionKindLabel(response?.detected_kind), response?.component_type].filter(Boolean);
         if (elements.visionResultTitle) {
@@ -1377,6 +1382,8 @@ async function handleVisionPhoto(event) {
             elements.visionStatus.className = `vision-status ${lastVisionQuery ? "success" : "error"}`;
         }
         if (elements.visionSearchButton) elements.visionSearchButton.disabled = !lastVisionQuery;
+        const canFollowCircuit = response?.detected_kind === "component" && Boolean(String(response?.reference || response?.model || "").trim());
+        if (elements.visionCircuitButton) elements.visionCircuitButton.disabled = !canFollowCircuit;
         elements.visionResult?.classList.remove("hidden");
     } catch (error) {
         if (elements.visionStatus) {
@@ -1394,6 +1401,34 @@ function searchLastVisionResult() {
     elements.searchForm?.requestSubmit();
 }
 
+async function followLastVisionCircuit() {
+    const reference = String(lastVisionResult?.reference || lastVisionResult?.model || lastVisionQuery || "").trim();
+    if (!reference) return;
+    const button = elements.visionCircuitButton;
+    const previousText = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = "Buscando componente…"; }
+    try {
+        const params = new URLSearchParams({ q: reference, limit: "50" });
+        if (elements.searchOrganization?.value) params.set("organization_id", elements.searchOrganization.value);
+        if (elements.searchPlant?.value) params.set("plant_id", elements.searchPlant.value);
+        if (elements.searchSector?.value) params.set("sector_id", elements.searchSector.value);
+        const response = await apiRequest(`${API.componentCatalog}?${params.toString()}`);
+        const items = response?.items || [];
+        const normalized = reference.toUpperCase().replace(/\s+/g, "");
+        const exact = items.find(item => String(item.reference || "").toUpperCase().replace(/\s+/g, "") === normalized);
+        const selected = exact || items[0];
+        if (!selected) throw new Error(`No se encontró ${reference} en el catálogo de componentes. Primero procesá el plano o usá Buscar en planos.`);
+        await showComponentGraph(selected);
+    } catch (error) {
+        if (elements.visionStatus) {
+            elements.visionStatus.textContent = error.message;
+            elements.visionStatus.className = "vision-status error";
+        }
+    } finally {
+        if (button) { button.disabled = false; button.textContent = previousText || "🔄 Seguir circuito"; }
+    }
+}
+
 function retryVisionPhoto() {
     elements.visionPhoto?.click();
 }
@@ -1404,6 +1439,7 @@ function initializeSearchEvents() {
     elements.componentPhoto?.addEventListener("change", handleComponentPhoto);
     elements.visionPhoto?.addEventListener("change", handleVisionPhoto);
     elements.visionSearchButton?.addEventListener("click", searchLastVisionResult);
+    elements.visionCircuitButton?.addEventListener("click", followLastVisionCircuit);
     elements.visionRetryButton?.addEventListener("click", retryVisionPhoto);
 }
 
@@ -1411,7 +1447,7 @@ function initializeSearchEvents() {
 
 
 /* =========================================================
-   CATÁLOGO DE COMPONENTES v0.9.4
+   CATÁLOGO DE COMPONENTES v0.9.5
    ========================================================= */
 
 const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
