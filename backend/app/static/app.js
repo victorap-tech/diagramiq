@@ -188,6 +188,13 @@ function normalizeId(value) {
 }
 
 
+function selectedNumericValue(selectElement) {
+    if (!selectElement) return null;
+    const value = normalizeId(selectElement.value);
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+
 function getObjectId(item) {
     return (
         item?.id ??

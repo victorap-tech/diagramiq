@@ -1206,7 +1206,7 @@ textarea {
 .result-priority-badge.list { background:#fff4dc; color:#825300; border:1px solid #e7c477; }
 .result-priority-badge.secondary { background:#eef2f6; color:#566474; border:1px solid #ccd5df; }
 
-/* v0.9.9: preguntas contextuales a la IA */
+/* v0.10.0: estabilización del asistente contextual */
 .ai-question-card { margin-top: 18px; }
 .ai-question-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
 .ai-question-heading h3 { margin:4px 0 5px; }
