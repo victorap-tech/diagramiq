@@ -8,6 +8,7 @@ from sqlalchemy import inspect, text
 
 from app.database import Base, engine
 from app.services.storage_service import storage_enabled, bucket_name, storage_config_status
+from app.services.vision_provider import provider_status
 from app.routers import (
     documents,
     equipments,
@@ -86,10 +87,10 @@ ensure_connection_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.9.7",
+    version="0.9.8",
 )
 
-APP_VERSION = "0.9.7"
+APP_VERSION = "0.9.8"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -149,4 +150,5 @@ def health():
         "bucket_configured": storage_enabled(),
         "bucket_name": bucket_name(),
         "storage_config": storage_config_status(),
+        "ai": provider_status(),
     }

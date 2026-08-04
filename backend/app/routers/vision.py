@@ -1,11 +1,9 @@
-import base64
 import json
-import os
 import re
-import urllib.error
-import urllib.request
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile
+
+from app.services.vision_provider import analyze_image as analyze_with_provider
 
 router = APIRouter(prefix="/vision", tags=["DiagramIQ Vision"])
 
@@ -78,13 +76,6 @@ def _parse_json(text: str) -> dict:
 @router.post("/analyze")
 async def analyze_image(image: UploadFile = File(...)):
     """Modo automático tipo Lens: detecta TAG, componente o texto de una hoja y prepara la búsqueda."""
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Falta configurar OPENAI_API_KEY en Railway.",
-        )
-
     content_type = (image.content_type or "").lower()
     if content_type not in ALLOWED_TYPES:
         raise HTTPException(415, "Usá una imagen JPG, PNG o WEBP.")
@@ -95,8 +86,6 @@ async def analyze_image(image: UploadFile = File(...)):
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "La imagen supera el límite de 8 MB.")
 
-    encoded = base64.b64encode(image_bytes).decode("ascii")
-    model = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
     prompt = (
         "Actuá como DiagramIQ Vision, un Google Lens industrial. Analizá solamente lo visible en la foto y no inventes. "
         "Primero decidí detected_kind: cable_tag si predomina una etiqueta o identificación de cable; component si se ve un "
@@ -108,39 +97,11 @@ async def analyze_image(image: UploadFile = File(...)):
         "código de cable si existe. Respondé EXCLUSIVAMENTE JSON válido con: detected_kind, component_type, reference, cable_tag, "
         "brand, model, visible_text (lista), confidence entre 0 y 1 y description breve. Usá cadenas vacías si no se lee."
     )
-    body = json.dumps({
-        "model": model,
-        "input": [{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": f"data:{content_type};base64,{encoded}"},
-            ],
-        }],
-        "max_output_tokens": 500,
-    }).encode("utf-8")
+    ai_response = analyze_with_provider(prompt, image_bytes, content_type, max_tokens=500)
 
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=body,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=50) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        try:
-            detail = json.loads(error_body).get("error", {}).get("message")
-        except json.JSONDecodeError:
-            detail = None
-        raise HTTPException(502, f"DiagramIQ Vision no pudo analizar la foto: {detail or 'error de API'}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise HTTPException(504, "DiagramIQ Vision tardó demasiado o no respondió.") from exc
-
-    result = _parse_json(_extract_output_text(payload))
-    result["model_used"] = model
+    result = _parse_json(ai_response.text)
+    result["model_used"] = ai_response.model
+    result["ai_provider"] = ai_response.provider
     if not result["search_query"]:
         result["message"] = "No se pudo leer una referencia. Acercá la cámara a la etiqueta o placa frontal."
     return result
