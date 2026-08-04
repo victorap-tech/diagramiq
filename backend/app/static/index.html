@@ -233,6 +233,30 @@
                     </div>
                 </div>
 
+                <div class="vision-card">
+                    <div class="vision-card-header">
+                        <div>
+                            <span class="vision-badge">NUEVO · v0.9</span>
+                            <strong>DiagramIQ Vision</strong>
+                            <p>Apuntá como con Google Lens. Detecta automáticamente TAG, componente, marca, modelo o texto del plano.</p>
+                        </div>
+                        <label class="primary-button vision-camera-button" for="visionPhoto">📷 Abrir cámara</label>
+                        <input id="visionPhoto" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                    </div>
+                    <div id="visionStatus" class="vision-status"></div>
+                    <div id="visionResult" class="vision-result hidden" aria-live="polite">
+                        <div id="visionResultTitle" class="vision-result-title"></div>
+                        <div id="visionResultDetails" class="vision-result-details"></div>
+                        <div class="vision-actions">
+                            <button id="visionSearchButton" class="primary-button" type="button">🔎 Buscar en planos</button>
+                            <button id="visionRetryButton" class="secondary-button" type="button">📷 Otra foto</button>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="vision-legacy-options">
+                    <summary>Modos específicos</summary>
+
                 <div class="tag-photo-card">
                     <div>
                         <strong>Buscar por foto del TAG de cable</strong>
@@ -256,6 +280,7 @@
                     <input id="componentPhoto" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
                     <span id="componentPhotoStatus" class="tag-photo-status"></span>
                 </div>
+                </details>
 
                 <form id="searchForm">
                     <div class="search-box">
@@ -663,7 +688,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.8.1</span>
+        <span>DiagramIQ v0.9.0</span>
 
         <a
             href="/docs"

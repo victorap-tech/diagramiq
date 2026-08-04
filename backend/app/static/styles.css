@@ -1108,3 +1108,37 @@ textarea {
 .component-photo-card {
     margin-top: 12px;
 }
+
+/* v0.9.0: DiagramIQ Vision, modo automático tipo Lens */
+.vision-card {
+    margin: 18px 0;
+    padding: 18px;
+    border: 1px solid #93b7df;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #f4f9ff 0%, #ffffff 70%);
+    box-shadow: 0 8px 24px rgba(18, 72, 125, .08);
+}
+.vision-card-header { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: center; }
+.vision-card-header strong { display: block; margin-top: 5px; font-size: 1.12rem; }
+.vision-card-header p { margin: 5px 0 0; color: var(--muted-text, #5f6b7a); }
+.vision-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: .72rem; font-weight: 800; background: #dcecff; color: #174f84; }
+.vision-camera-button { cursor: pointer; white-space: nowrap; text-align: center; }
+.vision-status { min-height: 1.3em; margin-top: 12px; font-size: .92rem; }
+.vision-status.loading { color: #315f8d; font-weight: 700; }
+.vision-status.success { color: #18794e; font-weight: 700; }
+.vision-status.error { color: var(--danger, #b42318); font-weight: 700; }
+.vision-result { margin-top: 12px; border-top: 1px solid #d7e4f1; padding-top: 12px; }
+.vision-result-title { font-weight: 800; margin-bottom: 9px; }
+.vision-result-details { display: grid; gap: 6px; }
+.vision-result-details > div { display: grid; grid-template-columns: 95px minmax(0,1fr); gap: 10px; }
+.vision-result-details span { color: var(--muted-text, #5f6b7a); }
+.vision-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.vision-legacy-options { margin: 8px 0 18px; }
+.vision-legacy-options > summary { cursor: pointer; color: #315f8d; font-weight: 700; }
+.hidden { display: none !important; }
+@media (max-width: 640px) {
+    .vision-card-header { grid-template-columns: 1fr; }
+    .vision-camera-button { width: 100%; }
+    .vision-actions button { flex: 1 1 100%; }
+    .vision-result-details > div { grid-template-columns: 82px minmax(0,1fr); }
+}

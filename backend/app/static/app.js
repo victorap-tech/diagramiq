@@ -18,6 +18,7 @@ const API = {
     search: "/search",
     cableTagRecognize: "/cable-tags/recognize",
     componentRecognize: "/components/recognize",
+    visionAnalyze: "/vision/analyze",
 };
 
 
@@ -54,6 +55,13 @@ const elements = {
     cableTagStatus: document.getElementById("cableTagStatus"),
     componentPhoto: document.getElementById("componentPhoto"),
     componentPhotoStatus: document.getElementById("componentPhotoStatus"),
+    visionPhoto: document.getElementById("visionPhoto"),
+    visionStatus: document.getElementById("visionStatus"),
+    visionResult: document.getElementById("visionResult"),
+    visionResultTitle: document.getElementById("visionResultTitle"),
+    visionResultDetails: document.getElementById("visionResultDetails"),
+    visionSearchButton: document.getElementById("visionSearchButton"),
+    visionRetryButton: document.getElementById("visionRetryButton"),
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
@@ -1313,10 +1321,74 @@ async function handleComponentPhoto(event) {
     }
 }
 
+let lastVisionQuery = "";
+
+function visionKindLabel(kind) {
+    return ({ cable_tag: "TAG de cable", component: "Componente", document: "Plano o documento", unknown: "Elemento" })[kind] || "Elemento";
+}
+
+async function handleVisionPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    lastVisionQuery = "";
+    elements.visionResult?.classList.add("hidden");
+    if (elements.visionStatus) {
+        elements.visionStatus.textContent = "Analizando foto...";
+        elements.visionStatus.className = "vision-status loading";
+    }
+    const formData = new FormData();
+    formData.append("image", file);
+    try {
+        const response = await apiRequest(API.visionAnalyze, { method: "POST", body: formData });
+        lastVisionQuery = String(response?.search_query || "").trim();
+        const confidence = Number(response?.confidence || 0);
+        const titleParts = [visionKindLabel(response?.detected_kind), response?.component_type].filter(Boolean);
+        if (elements.visionResultTitle) {
+            elements.visionResultTitle.textContent = `${titleParts.join(" · ") || "Resultado"}${confidence ? ` · ${Math.round(confidence * 100)}%` : ""}`;
+        }
+        const rows = [
+            ["TAG", response?.cable_tag], ["Referencia", response?.reference],
+            ["Marca", response?.brand], ["Modelo", response?.model],
+            ["Descripción", response?.description],
+        ].filter(([, value]) => String(value || "").trim());
+        if (elements.visionResultDetails) {
+            elements.visionResultDetails.innerHTML = rows.map(([label, value]) =>
+                `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`
+            ).join("") || `<div><strong>${escapeHtml(response?.message || "No se pudo leer información suficiente.")}</strong></div>`;
+        }
+        if (elements.visionStatus) {
+            elements.visionStatus.textContent = lastVisionQuery ? `Listo para buscar: ${lastVisionQuery}` : (response?.message || "Acercá la cámara y probá otra vez.");
+            elements.visionStatus.className = `vision-status ${lastVisionQuery ? "success" : "error"}`;
+        }
+        if (elements.visionSearchButton) elements.visionSearchButton.disabled = !lastVisionQuery;
+        elements.visionResult?.classList.remove("hidden");
+    } catch (error) {
+        if (elements.visionStatus) {
+            elements.visionStatus.textContent = error.message;
+            elements.visionStatus.className = "vision-status error";
+        }
+    } finally {
+        event.target.value = "";
+    }
+}
+
+function searchLastVisionResult() {
+    if (!lastVisionQuery) return;
+    elements.searchInput.value = lastVisionQuery;
+    elements.searchForm?.requestSubmit();
+}
+
+function retryVisionPhoto() {
+    elements.visionPhoto?.click();
+}
+
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
     elements.componentPhoto?.addEventListener("change", handleComponentPhoto);
+    elements.visionPhoto?.addEventListener("change", handleVisionPhoto);
+    elements.visionSearchButton?.addEventListener("click", searchLastVisionResult);
+    elements.visionRetryButton?.addEventListener("click", retryVisionPhoto);
 }
 
 
