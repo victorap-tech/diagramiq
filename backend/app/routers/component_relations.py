@@ -185,6 +185,21 @@ def _candidate_edges(source, db: Session):
     return edges[:8]
 
 
+
+def _flow_direction(source_type: str, target_type: str) -> str:
+    """Inferencia preliminar del sentido funcional del circuito."""
+    rank = {
+        "transformador": 0, "interruptor": 1, "fusible": 1, "guardamotor": 2,
+        "contactor": 3, "relé térmico": 4, "variador": 5, "motor": 6,
+        "PLC": 2, "módulo de salidas": 3, "bornera": 4,
+        "sensor": 1, "módulo de entradas": 2,
+    }
+    a = rank.get(source_type)
+    b = rank.get(target_type)
+    if a is None or b is None or a == b:
+        return "unknown"
+    return "downstream" if a < b else "upstream"
+
 @router.get("/{reference_id}/graph")
 def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends(get_db)):
     """Construye un grafo preliminar navegable desde un componente.
@@ -210,9 +225,12 @@ def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends
 
         for target, confidence, relation, reason in _candidate_edges(current, db):
             nodes.setdefault(target.id, _node_payload(target))
+            current_type = infer_type(current.reference, current.detected_type, current.component_type)
+            target_type = infer_type(target.reference, target.detected_type, target.component_type)
             edges.append({
                 "source": current.id,
                 "target": target.id,
+                "direction": _flow_direction(current_type, target_type),
                 "confidence": confidence,
                 "relation": relation,
                 "reason": reason,
@@ -239,6 +257,7 @@ def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends
                     edges.append({
                         "source": current.id,
                         "target": target.id,
+                        "direction": "unknown",
                         "confidence": 95,
                         "relation": "misma referencia en otra página",
                         "reason": "continuidad por referencia exacta",
@@ -251,5 +270,5 @@ def get_component_graph(reference_id: int, depth: int = 2, db: Session = Depends
         "depth": depth,
         "nodes": list(nodes.values()),
         "edges": edges,
-        "note": "Grafo preliminar generado por referencias exactas, referencias cruzadas y proximidad. Confirmar siempre sobre el plano antes de intervenir.",
+        "note": "Seguimiento preliminar generado por referencias exactas, referencias cruzadas y proximidad. El sentido origen/destino es inferido y debe confirmarse sobre el plano.",
     }

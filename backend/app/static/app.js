@@ -1411,7 +1411,7 @@ function initializeSearchEvents() {
 
 
 /* =========================================================
-   CATÁLOGO DE COMPONENTES v0.9.3
+   CATÁLOGO DE COMPONENTES v0.9.4
    ========================================================= */
 
 const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
@@ -1498,7 +1498,7 @@ function renderComponentCatalog(items) {
             <div class="component-catalog-actions">
                 <button type="button" class="primary-button" data-open-component="${index}">Ver en plano</button>
                 <button type="button" class="secondary-button" data-relations-component="${index}">Ver relaciones</button>
-                <button type="button" class="secondary-button" data-graph-component="${index}">Ver grafo</button>
+                <button type="button" class="secondary-button" data-graph-component="${index}">Seguir circuito</button>
             </div>
         </article>`).join('');
     elements.componentsList.querySelectorAll('[data-open-component]').forEach(btn => btn.addEventListener('click', () => openComponentInSearch(state.componentCatalog[Number(btn.dataset.openComponent)])));
@@ -1513,7 +1513,7 @@ async function showComponentGraph(item) {
     const dialog = document.createElement('dialog');
     dialog.id = 'componentGraphDialog';
     dialog.className = 'relations-dialog graph-dialog';
-    dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Construyendo grafo</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-graph>✕</button></div><div class="loading-state">Siguiendo referencias y componentes relacionados…</div></div>`;
+    dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Siguiendo circuito</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-graph>✕</button></div><div class="loading-state">Buscando el origen y el destino del circuito…</div></div>`;
     document.body.appendChild(dialog);
     dialog.querySelector('[data-close-graph]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => dialog.remove());
@@ -1526,10 +1526,13 @@ async function showComponentGraph(item) {
         const connected = new Set([String(response.root_id)]);
         edges.forEach(e => { connected.add(String(e.source)); connected.add(String(e.target)); });
         dialog.querySelector('.relations-dialog-body').innerHTML = `
-            <div class="relations-dialog-header"><div><small>Grafo de conexiones · ${nodes.length} nodos</small><h2>${escapeHtml(item.reference || '')}</h2></div><button type="button" class="icon-button" data-close-graph>✕</button></div>
+            <div class="relations-dialog-header"><div><small>Seguir circuito · ${nodes.length} componentes</small><h2>${escapeHtml(item.reference || '')}</h2></div><button type="button" class="icon-button" data-close-graph>✕</button></div>
             <p class="relations-note">${escapeHtml(response.note || '')}</p>
-            <div class="graph-root">${escapeHtml(byId[String(response.root_id)]?.reference || item.reference || '')}</div>
-            <div class="graph-edge-list">${edges.length ? edges.map((e,i) => { const a=byId[String(e.source)]||{}; const b=byId[String(e.target)]||{}; return `<article class="graph-edge-card"><div class="graph-path"><button type="button" data-graph-node="${a.id}">${escapeHtml(a.reference || '')}</button><span>→</span><button type="button" data-graph-node="${b.id}">${escapeHtml(b.reference || '')}</button></div><p>${escapeHtml(e.relation || '')}</p><small>${escapeHtml(e.reason || '')} · confianza ${e.confidence}%${e.cross_page ? ' · entre páginas' : ''}</small></article>`; }).join('') : '<div class="empty-state"><strong>No se pudo formar un grafo.</strong><p>Probá con otro componente que tenga referencias cruzadas.</p></div>'}</div>`;
+            <div class="circuit-root"><small>Componente seleccionado</small><strong>${escapeHtml(byId[String(response.root_id)]?.reference || item.reference || '')}</strong></div>
+            <div class="circuit-columns">
+                <section><h3>Origen / alimentación</h3><div class="graph-edge-list">${edges.filter(e => String(e.target) === String(response.root_id) || e.direction === 'upstream').length ? edges.filter(e => String(e.target) === String(response.root_id) || e.direction === 'upstream').map((e) => { const a=byId[String(e.source)]||{}; const b=byId[String(e.target)]||{}; return `<article class="graph-edge-card"><div class="graph-path"><button type="button" data-graph-node="${a.id}">${escapeHtml(a.reference || '')}</button><span>→</span><button type="button" data-graph-node="${b.id}">${escapeHtml(b.reference || '')}</button></div><p>${escapeHtml(e.relation || '')}</p><small>${escapeHtml(e.reason || '')} · confianza ${e.confidence}%${e.cross_page ? ' · entre páginas' : ''}</small></article>`; }).join('') : '<div class="empty-state compact">Sin origen confirmado.</div>'}</div></section>
+                <section><h3>Destino / carga</h3><div class="graph-edge-list">${edges.filter(e => String(e.source) === String(response.root_id) || e.direction === 'downstream').length ? edges.filter(e => String(e.source) === String(response.root_id) || e.direction === 'downstream').map((e) => { const a=byId[String(e.source)]||{}; const b=byId[String(e.target)]||{}; return `<article class="graph-edge-card"><div class="graph-path"><button type="button" data-graph-node="${a.id}">${escapeHtml(a.reference || '')}</button><span>→</span><button type="button" data-graph-node="${b.id}">${escapeHtml(b.reference || '')}</button></div><p>${escapeHtml(e.relation || '')}</p><small>${escapeHtml(e.reason || '')} · confianza ${e.confidence}%${e.cross_page ? ' · entre páginas' : ''}</small></article>`; }).join('') : '<div class="empty-state compact">Sin destino confirmado.</div>'}</div></section>
+            </div>`;
         dialog.querySelector('[data-close-graph]').addEventListener('click', () => dialog.close());
         dialog.querySelectorAll('[data-graph-node]').forEach(btn => btn.addEventListener('click', () => {
             const node = byId[String(btn.dataset.graphNode)];
@@ -1538,7 +1541,7 @@ async function showComponentGraph(item) {
             openComponentInSearch({...item, reference: node.reference, model: node.model});
         }));
     } catch (error) {
-        dialog.querySelector('.relations-dialog-body').innerHTML = `<div class="relations-dialog-header"><h2>No se pudo construir el grafo</h2><button type="button" class="icon-button" data-close-graph>✕</button></div><p>${escapeHtml(error.message)}</p>`;
+        dialog.querySelector('.relations-dialog-body').innerHTML = `<div class="relations-dialog-header"><h2>No se pudo seguir el circuito</h2><button type="button" class="icon-button" data-close-graph>✕</button></div><p>${escapeHtml(error.message)}</p>`;
         dialog.querySelector('[data-close-graph]').addEventListener('click', () => dialog.close());
     }
 }
