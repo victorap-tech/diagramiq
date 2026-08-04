@@ -605,9 +605,9 @@ def process_pdf_document(
 
             processed_pages += 1
 
-            # En documentos de cientos de páginas,
-            # evita acumular toda la transacción en memoria.
-            if processed_pages % 20 == 0:
+            # Mantiene las transacciones cortas para que SQLite no bloquee
+            # las búsquedas mientras se indexa un PDF grande.
+            if processed_pages % 5 == 0:
                 db.commit()
 
         document.processing_status = "completed"

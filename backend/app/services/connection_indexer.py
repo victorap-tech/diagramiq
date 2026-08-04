@@ -116,6 +116,10 @@ def rebuild_document_connections(document_id: int, db: Session) -> int:
                     cross_page=0,
                 ))
                 count += 1
+                # Libera periódicamente el bloqueo de escritura de SQLite.
+                if count % 250 == 0:
+                    document.connection_count = count
+                    db.commit()
 
     # La misma referencia en distintas páginas representa continuidad fuerte.
     refs = (
@@ -149,6 +153,9 @@ def rebuild_document_connections(document_id: int, db: Session) -> int:
                 cross_page=1,
             ))
             count += 1
+            if count % 250 == 0:
+                document.connection_count = count
+                db.commit()
 
     document.connection_count = count
     document.connection_status = "completed"

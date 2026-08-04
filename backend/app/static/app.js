@@ -1447,7 +1447,7 @@ function initializeSearchEvents() {
 
 
 /* =========================================================
-   CATÁLOGO DE COMPONENTES v0.9.6
+   CATÁLOGO DE COMPONENTES v0.9.6.1
    ========================================================= */
 
 const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
