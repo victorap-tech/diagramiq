@@ -407,6 +407,10 @@ def upload_document(
         document_type=clean_document_type,
         page_count=page_count,
         processing_status="pending",
+        processing_stage="waiting",
+        processing_progress=0,
+        processed_pages=0,
+        processing_message="Esperando para comenzar",
         sector_id=sector.id,
         equipment_id=equipment.id if equipment else None,
     )
@@ -474,6 +478,43 @@ def cleanup_duplicate_documents(db: Session = Depends(get_db)):
         "groups_consolidated": kept,
         "skipped": skipped,
     }
+
+
+@router.get("/{document_id}/progress")
+def document_progress(document_id: int, db: Session = Depends(get_db)):
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    total = document.page_count or 0
+    return {
+        "document_id": document.id,
+        "status": document.processing_status,
+        "stage": document.processing_stage,
+        "progress": document.processing_progress or 0,
+        "processed_pages": document.processed_pages or 0,
+        "total_pages": total,
+        "components": document.detected_components or 0,
+        "terms": document.detected_terms or 0,
+        "relations": document.connection_count or 0,
+        "message": document.processing_message,
+    }
+
+
+@router.post("/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
+def reindex_document(document_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    if document.processing_status == "processing":
+        raise HTTPException(status_code=409, detail="El documento ya se está procesando")
+    document.processing_status = "pending"
+    document.processing_stage = "waiting"
+    document.processing_progress = 0
+    document.processed_pages = 0
+    document.processing_message = "Reindexación en cola"
+    db.commit()
+    background_tasks.add_task(process_document_in_background, document.id)
+    return {"message": "Reindexación iniciada", "document_id": document.id}
 
 
 @router.post(

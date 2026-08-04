@@ -126,6 +126,12 @@ class Document(Base):
         nullable=False,
         default="uploaded",
     )
+    processing_stage = Column(String(80), nullable=True, default="waiting")
+    processing_progress = Column(Integer, nullable=False, default=0)
+    processed_pages = Column(Integer, nullable=False, default=0)
+    detected_components = Column(Integer, nullable=False, default=0)
+    detected_terms = Column(Integer, nullable=False, default=0)
+    processing_message = Column(Text, nullable=True)
     connection_status = Column(String(50), nullable=False, default="pending")
     connection_count = Column(Integer, nullable=False, default=0)
     sector_id = Column(

@@ -85,13 +85,35 @@ def ensure_connection_columns() -> None:
 
 ensure_connection_columns()
 
+def ensure_processing_columns() -> None:
+    """Agrega el seguimiento de progreso sin borrar datos existentes."""
+    inspector = inspect(engine)
+    if "documents" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("documents")}
+    definitions = {
+        "processing_stage": "VARCHAR(80)",
+        "processing_progress": "INTEGER NOT NULL DEFAULT 0",
+        "processed_pages": "INTEGER NOT NULL DEFAULT 0",
+        "detected_components": "INTEGER NOT NULL DEFAULT 0",
+        "detected_terms": "INTEGER NOT NULL DEFAULT 0",
+        "processing_message": "TEXT",
+    }
+    with engine.begin() as connection:
+        for name, definition in definitions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE documents ADD COLUMN {name} {definition}"))
+
+
+ensure_processing_columns()
+
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.10.0",
+    version="0.10.1",
 )
 
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.10.1"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent

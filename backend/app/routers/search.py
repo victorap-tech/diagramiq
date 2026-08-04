@@ -8,7 +8,7 @@ from app import models
 from app.database import get_db
 from app.services.pdf_service import (
     REFERENCE_PATTERN, analyze_context_text, extract_references,
-    normalize_reference, normalize_search_term,
+    is_valid_component_reference, normalize_reference, normalize_search_term,
 )
 
 router = APIRouter(prefix="/search", tags=["Búsqueda"])
@@ -337,7 +337,8 @@ def serialize_reference(item: models.ComponentReference, query: str, ranking: di
     }
     related = [
         ref for ref in extract_references(item.row_text or "")
-        if normalize_reference(ref) != normalize_reference(item.reference)
+        if is_valid_component_reference(ref)
+        and normalize_reference(ref) != normalize_reference(item.reference)
     ]
     result.update({
         "match_type": "reference",
@@ -423,6 +424,10 @@ def search_documents(
         ranked_items = []
         primary_reference = extracted_references[0]
         for item in items:
+            # Compatibilidad con índices antiguos: descartar falsos positivos
+            # como palabras de borde que fueron clasificadas como DI/DO.
+            if not is_valid_component_reference(item.reference):
+                continue
             ranking_score, ranking = score_reference_result(item, primary_reference)
             ranked_items.append((ranking_score, item.document_page.page_number, item.id, item, ranking))
 

@@ -80,6 +80,14 @@ class DocumentResponse(BaseModel):
     document_type: str | None = None
     page_count: int | None = None
     processing_status: str
+    processing_stage: str | None = None
+    processing_progress: int = 0
+    processed_pages: int = 0
+    detected_components: int = 0
+    detected_terms: int = 0
+    processing_message: str | None = None
+    connection_status: str | None = None
+    connection_count: int = 0
 
     sector_id: int
     equipment_id: int | None = None

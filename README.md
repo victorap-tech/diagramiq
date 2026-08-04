@@ -40,3 +40,10 @@ AI_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 OPENAI_VISION_MODEL=gpt-4.1-mini
 ```
+
+
+## v0.10.1 - Centro de procesamiento
+- Progreso persistente por PDF y página.
+- Etapa actual, componentes, términos y relaciones detectadas.
+- Actualización automática cada 2 segundos mientras hay trabajos activos.
+- Botón Reindexar PDF sin volver a cargar el archivo.

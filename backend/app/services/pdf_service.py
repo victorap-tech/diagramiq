@@ -21,9 +21,11 @@ RENDER_SCALE = 1.5
 
 REFERENCE_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:"
-    # Designaciones IEC habituales, con o sin prefijo gráfico (=, + o -).
-    r"[-=+]?(?:KM|KA|KE|K|QF|QS|QA|FU|FR|FC|PLC|DI|DO|AI|AO|XD|XT|X|M|B|V)"
-    r"[A-Z0-9]+(?:[_./-][A-Z0-9]+)*|"
+    # Designaciones IEC de componentes. DI/DO/AI/AO deben llevar número
+    # para no confundir palabras del borde como DIESES.
+    r"[-=+]?(?:(?:KM|KA|KE|QF|QS|QA|FU|FR|FC|PLC|XD|XT|X|M|B|V)[A-Z0-9]+"
+    r"|(?:DI|DO|AI|AO)\d+[A-Z0-9]*)"
+    r"(?:[_./-][A-Z0-9]+)*|"
     # Potenciales y nombres de conductores: 401_A1+, 24VDC+, L1, N, PE.
     r"\d{2,}[A-Z0-9]*(?:_[A-Z0-9]+)+(?:[+-])?|"
     r"(?:24VDC|24VAC|230VAC|400VAC)[+-]?|"
@@ -31,6 +33,11 @@ REFERENCE_PATTERN = re.compile(
     r")(?![A-Z0-9])",
     re.IGNORECASE,
 )
+
+INVALID_REFERENCE_WORDS = {
+    "DIESES", "PIEZA", "PIEZAS", "LISTA", "PLANO", "PAGINA", "PÁGINA",
+    "INDICE", "ÍNDICE", "DOCUMENTO", "DESCRIPCION", "DESCRIPCIÓN",
+}
 
 
 
@@ -98,6 +105,19 @@ def classify_reference(reference: str) -> str:
     return "Referencia técnica"
 
 
+def is_valid_component_reference(reference: str) -> bool:
+    value = normalize_reference(reference)
+    if not value or value in INVALID_REFERENCE_WORDS:
+        return False
+    # E/S de PLC válidas: DI1, DO12, AI3, AO4. No palabras como DIESES.
+    if value.startswith(("DI", "DO", "AI", "AO")):
+        return bool(re.fullmatch(r"(?:DI|DO|AI|AO)\d+[A-Z0-9]*(?:[_./-][A-Z0-9]+)*", value))
+    # Una referencia alfabética sin número sólo es válida para potenciales.
+    if value not in {"N", "PE"} and not any(ch.isdigit() for ch in value):
+        return False
+    return True
+
+
 def extract_references(text: str) -> list[str]:
     """
     Extrae referencias únicas del texto de una página.
@@ -112,7 +132,7 @@ def extract_references(text: str) -> list[str]:
     normalized = {
         normalize_reference(match)
         for match in matches
-        if normalize_reference(match)
+        if normalize_reference(match) and is_valid_component_reference(match)
     }
 
     return sorted(normalized)
@@ -518,6 +538,12 @@ def process_pdf_document(
         )
 
     document.processing_status = "processing"
+    document.processing_stage = "preparing"
+    document.processing_progress = 1
+    document.processed_pages = 0
+    document.detected_components = 0
+    document.detected_terms = 0
+    document.processing_message = "Preparando el PDF"
     db.commit()
 
     pdf: fitz.Document | None = None
@@ -539,6 +565,11 @@ def process_pdf_document(
         )
 
         pdf = fitz.open(pdf_path)
+        document.page_count = pdf.page_count
+        document.processing_stage = "extracting"
+        document.processing_progress = 3
+        document.processing_message = "Extrayendo texto e indexando páginas"
+        db.commit()
 
         if pdf.page_count <= 0:
             raise ValueError(
@@ -591,26 +622,35 @@ def process_pdf_document(
             db.add(new_page)
             db.flush()
 
-            save_page_references(
+            component_count = save_page_references(
                 page=page,
                 text_content=text_content,
                 document_page=new_page,
                 db=db,
             )
-            save_page_search_terms(
+            term_count = save_page_search_terms(
                 page=page,
                 document_page=new_page,
                 db=db,
             )
 
             processed_pages += 1
+            document.processed_pages = processed_pages
+            document.detected_components = (document.detected_components or 0) + component_count
+            document.detected_terms = (document.detected_terms or 0) + term_count
+            document.processing_stage = "indexing"
+            document.processing_progress = min(88, 5 + round((processed_pages / pdf.page_count) * 83))
+            document.processing_message = f"Página {processed_pages} de {pdf.page_count}"
 
             # Mantiene las transacciones cortas para que SQLite no bloquee
             # las búsquedas mientras se indexa un PDF grande.
             if processed_pages % 5 == 0:
                 db.commit()
 
-        document.processing_status = "completed"
+        document.processing_status = "processing"
+        document.processing_stage = "connections"
+        document.processing_progress = 92
+        document.processing_message = "Generando relaciones entre componentes"
         document.page_count = pdf.page_count
         document.connection_status = "pending"
 
@@ -619,6 +659,11 @@ def process_pdf_document(
         # siguen consultando el índice existente y no esperan este análisis.
         rebuild_document_connections(document.id, db)
         db.refresh(document)
+        document.processing_status = "completed"
+        document.processing_stage = "completed"
+        document.processing_progress = 100
+        document.processing_message = "Procesamiento completado"
+        db.commit()
 
         return processed_pages
 
@@ -636,6 +681,8 @@ def process_pdf_document(
 
         if document_db is not None:
             document_db.processing_status = "error"
+            document_db.processing_stage = "error"
+            document_db.processing_message = "El procesamiento terminó con error"
             document_db.connection_status = "error"
             db.commit()
 

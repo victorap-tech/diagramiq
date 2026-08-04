@@ -22,6 +22,7 @@ const API = {
     componentCatalog: "/component-catalog",
     componentRelations: "/component-relations",
     assistantAsk: "/assistant/ask",
+    documentProgress: (id) => `/documents/${id}/progress`,
 };
 
 
@@ -1503,12 +1504,12 @@ async function handleAiQuestion(event) {
     try {
         const response = await apiRequest(API.assistantAsk, {
             method: "POST",
-            body: JSON.stringify({
+            body: {
                 question,
                 organization_id: selectedNumericValue(elements.searchOrganization),
                 plant_id: selectedNumericValue(elements.searchPlant),
                 sector_id: sectorId,
-            }),
+            },
         });
         renderAiAnswer(response);
         if (elements.aiQuestionStatus) {
@@ -2234,7 +2235,9 @@ async function handleUploadSubmit(event) {
             body: formData,
         });
 
-        updateUploadProgress(100, "Documento cargado.");
+        updateUploadProgress(100, "Archivo cargado. La indexación continúa en segundo plano.");
+        await loadDocuments();
+        startDocumentProgressPolling();
 
         showMessage(
             elements.uploadMessage,
@@ -2422,6 +2425,19 @@ function renderDocuments(documents) {
                         </div>
                     </div>
 
+                    <div class="document-processing-panel">
+                        <div class="document-progress-heading">
+                            <strong>${escapeHtml(documentItem.processing_message || translateStatus(status))}</strong>
+                            <span>${escapeHtml(documentItem.processing_progress || 0)}%</span>
+                        </div>
+                        <div class="document-progress-track"><div class="document-progress-fill" style="width:${Math.max(0, Math.min(100, Number(documentItem.processing_progress || 0)))}%"></div></div>
+                        <div class="document-progress-details">
+                            <span>Páginas: ${escapeHtml(documentItem.processed_pages || 0)} / ${escapeHtml(pages || 0)}</span>
+                            <span>Componentes: ${escapeHtml(documentItem.detected_components || 0)}</span>
+                            <span>Relaciones: ${escapeHtml(documentItem.connection_count || 0)}</span>
+                        </div>
+                    </div>
+
                     <div class="document-card-actions">
                         <span class="status-badge ${statusClass(status)}">
                             ${escapeHtml(translateStatus(status))}
@@ -2432,12 +2448,11 @@ function renderDocuments(documents) {
                             target="_blank"
                             rel="noopener"
                         >Ver PDF</a>
-                        ${statusClass(status) === "completed" ? "" : `
                         <button
-                            class="secondary-button document-process-button"
+                            class="secondary-button document-reindex-button"
                             type="button"
                             data-document-id="${escapeHtml(documentItem.id)}"
-                        >Procesar</button>`}
+                        >${statusClass(status) === "completed" ? "Reindexar PDF" : "Procesar"}</button>
                         <button
                             class="danger-button document-delete-button"
                             type="button"
@@ -2460,6 +2475,7 @@ async function loadDocuments() {
         const response = await apiRequest(API.documents);
         state.documents = toArray(response);
         renderDocuments(state.documents);
+        if (state.documents.some((item) => ["pending", "processing"].includes(String(item.processing_status || "").toLowerCase()))) startDocumentProgressPolling();
     } catch (error) {
         console.error("Error cargando documentos:", error);
 
@@ -2474,20 +2490,37 @@ async function loadDocuments() {
 }
 
 
+let documentProgressTimer = null;
+
+function startDocumentProgressPolling() {
+    if (documentProgressTimer) return;
+    documentProgressTimer = setInterval(async () => {
+        const hasActive = state.documents.some((item) => ["pending", "processing"].includes(String(item.processing_status || "").toLowerCase()));
+        if (!hasActive) {
+            clearInterval(documentProgressTimer);
+            documentProgressTimer = null;
+            return;
+        }
+        await loadDocuments();
+    }, 2000);
+}
+
 async function handleDocumentsListClick(event) {
-    const processButton = event.target.closest(".document-process-button");
+    const processButton = event.target.closest(".document-reindex-button");
     if (processButton) {
+        const documentId = processButton.dataset.documentId;
+        if (!confirm("¿Reindexar este PDF? Se regenerarán páginas, componentes y relaciones sin volver a subir el archivo.")) return;
         processButton.disabled = true;
-        processButton.textContent = "Procesando...";
+        processButton.textContent = "Iniciando...";
         try {
-            const documentId = processButton.dataset.documentId;
-            const response = await apiRequest(`${API.documents}/${documentId}/process`, { method: "POST" });
-            showMessage(elements.documentsMessage, response?.message || "Documento procesado correctamente.", "success");
+            const response = await apiRequest(`${API.documents}/${documentId}/reindex`, { method: "POST" });
+            showMessage(elements.documentsMessage, response?.message || "Reindexación iniciada.", "success");
             await loadDocuments();
+            startDocumentProgressPolling();
         } catch (error) {
-            showMessage(elements.documentsMessage, `No se pudo procesar: ${error.message}`, "error");
+            showMessage(elements.documentsMessage, `No se pudo reindexar: ${error.message}`, "error");
             processButton.disabled = false;
-            processButton.textContent = "Procesar";
+            processButton.textContent = "Reindexar PDF";
         }
         return;
     }
