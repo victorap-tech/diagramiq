@@ -26,10 +26,24 @@ def create_plant(
         .first()
     )
 
+    # Un despliegue o una recreación de la base puede cambiar los IDs.
+    # El frontend también envía el nombre visible para recuperar la empresa
+    # correcta sin obligar al usuario a volver a crearla.
+    if organization is None and plant.organization_name:
+        normalized_name = plant.organization_name.strip().lower()
+        organization = (
+            db.query(models.Organization)
+            .filter(models.Organization.name.ilike(normalized_name))
+            .first()
+        )
+
     if organization is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Empresa no encontrada",
+            detail=(
+                "Empresa no encontrada. Actualizá la lista de empresas y "
+                "volvé a seleccionarla."
+            ),
         )
 
     name = plant.name.strip()
@@ -43,7 +57,7 @@ def create_plant(
     new_plant = models.Plant(
         name=name,
         location=plant.location,
-        organization_id=plant.organization_id,
+        organization_id=organization.id,
     )
 
     db.add(new_plant)

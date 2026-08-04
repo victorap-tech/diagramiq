@@ -18,6 +18,7 @@ class PlantCreate(BaseModel):
     name: str
     location: str | None = None
     organization_id: int
+    organization_name: str | None = None
 
 
 class PlantResponse(BaseModel):

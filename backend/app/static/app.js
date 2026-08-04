@@ -1551,6 +1551,13 @@ function updateUploadProgress(percent, text) {
 }
 
 
+function getSelectedOrganizationName() {
+    const option = elements.uploadOrganization?.selectedOptions?.[0];
+    if (!option || !option.value) return null;
+    return option.textContent?.trim() || null;
+}
+
+
 async function createPlantIfNeeded(organizationId, plantName) {
     const trimmedName = plantName.trim();
 
@@ -1576,6 +1583,7 @@ async function createPlantIfNeeded(organizationId, plantName) {
         body: {
             name: trimmedName,
             organization_id: normalizeId(organizationId),
+            organization_name: getSelectedOrganizationName(),
         },
     });
 
