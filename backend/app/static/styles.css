@@ -1157,3 +1157,17 @@ textarea {
 .component-catalog-actions { display:flex; gap:8px; margin-top:12px; }
 @media (max-width: 800px) { .component-filter-grid { grid-template-columns:1fr 1fr; } .component-query { grid-column:1/-1; } }
 @media (max-width: 520px) { .component-filter-grid { grid-template-columns:1fr; } .component-query { grid-column:auto; } }
+
+/* Relaciones entre componentes v0.9.2 */
+.relations-dialog { width:min(760px,94vw); max-height:88vh; border:0; border-radius:18px; padding:0; box-shadow:0 24px 80px rgba(15,23,42,.28); }
+.relations-dialog::backdrop { background:rgba(15,23,42,.55); }
+.relations-dialog-body { padding:22px; }
+.relations-dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:1px solid #e5e7eb; padding-bottom:14px; margin-bottom:14px; }
+.relations-dialog-header h2 { margin:2px 0 0; }
+.relations-note { font-size:.9rem; color:#526071; background:#f8fafc; border-radius:10px; padding:10px 12px; }
+.relations-list { display:grid; gap:10px; max-height:58vh; overflow:auto; padding-right:4px; }
+.relation-card { border:1px solid #dde3ea; border-radius:12px; padding:13px; background:#fff; }
+.relation-card > div:first-child { display:flex; justify-content:space-between; gap:12px; }
+.relation-card span { font-size:.8rem; text-transform:uppercase; color:#64748b; }
+.relation-card p { margin:7px 0; color:#334155; }
+.relation-card small { display:block; margin-bottom:10px; color:#64748b; }

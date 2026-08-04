@@ -20,6 +20,7 @@ const API = {
     componentRecognize: "/components/recognize",
     visionAnalyze: "/vision/analyze",
     componentCatalog: "/component-catalog",
+    componentRelations: "/component-relations",
 };
 
 
@@ -1410,7 +1411,7 @@ function initializeSearchEvents() {
 
 
 /* =========================================================
-   CATÁLOGO DE COMPONENTES v0.9.1
+   CATÁLOGO DE COMPONENTES v0.9.2
    ========================================================= */
 
 const COMPONENT_TYPES = ["interruptor","seccionador","guardamotor","contactor","relé","relé térmico","fusible","variador","PLC","módulo de entradas","módulo de salidas","módulo analógico","motor","sensor","bornera","pulsador","piloto","transformador","otro"];
@@ -1496,9 +1497,42 @@ function renderComponentCatalog(items) {
             </div>
             <div class="component-catalog-actions">
                 <button type="button" class="primary-button" data-open-component="${index}">Ver en plano</button>
+                <button type="button" class="secondary-button" data-relations-component="${index}">Ver relaciones</button>
             </div>
         </article>`).join('');
     elements.componentsList.querySelectorAll('[data-open-component]').forEach(btn => btn.addEventListener('click', () => openComponentInSearch(state.componentCatalog[Number(btn.dataset.openComponent)])));
+    elements.componentsList.querySelectorAll('[data-relations-component]').forEach(btn => btn.addEventListener('click', () => showComponentRelations(state.componentCatalog[Number(btn.dataset.relationsComponent)])));
+}
+
+async function showComponentRelations(item) {
+    if (!item?.id) return;
+    const old = document.getElementById('componentRelationsDialog');
+    old?.remove();
+    const dialog = document.createElement('dialog');
+    dialog.id = 'componentRelationsDialog';
+    dialog.className = 'relations-dialog';
+    dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Analizando relaciones</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-relations>✕</button></div><div class="loading-state">Buscando componentes relacionados en la misma página…</div></div>`;
+    document.body.appendChild(dialog);
+    dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+    try {
+        const response = await apiRequest(`${API.componentRelations}/${item.id}`);
+        const rows = response.relations || [];
+        dialog.querySelector('.relations-dialog-body').innerHTML = `
+            <div class="relations-dialog-header"><div><small>${escapeHtml(response.source?.component_type || 'componente')} · página ${response.source?.page_number || ''}</small><h2>${escapeHtml(response.source?.reference || item.reference || '')}</h2></div><button type="button" class="icon-button" data-close-relations>✕</button></div>
+            <p class="relations-note">${escapeHtml(response.note || '')}</p>
+            <div class="relations-list">${rows.length ? rows.map((r, i) => `<article class="relation-card"><div><strong>${escapeHtml(r.reference || 'Sin referencia')}</strong><span>${escapeHtml(r.component_type || 'otro')}</span></div><p>${escapeHtml(r.relation)} · ${escapeHtml(r.reason)}</p><small>Confianza preliminar: ${r.confidence}%</small><button type="button" class="secondary-button" data-open-related="${i}">Buscar en planos</button></article>`).join('') : '<div class="empty-state"><strong>No se detectaron relaciones suficientes.</strong><p>En esta etapa se analizan referencias cruzadas y proximidad dentro de la misma página.</p></div>'}</div>`;
+        dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
+        dialog.querySelectorAll('[data-open-related]').forEach(btn => btn.addEventListener('click', () => {
+            const rel = rows[Number(btn.dataset.openRelated)];
+            dialog.close();
+            openComponentInSearch({...item, reference: rel.reference, model: rel.model});
+        }));
+    } catch (error) {
+        dialog.querySelector('.relations-dialog-body').innerHTML = `<div class="relations-dialog-header"><h2>No se pudieron cargar las relaciones</h2><button type="button" class="icon-button" data-close-relations>✕</button></div><p>${escapeHtml(error.message)}</p>`;
+        dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
+    }
 }
 
 async function loadComponentCatalog() {
