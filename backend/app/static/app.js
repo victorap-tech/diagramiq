@@ -1802,7 +1802,11 @@ function renderComponentCatalog(items) {
             </div>
         </article>
     `).join('');
-    elements.componentsList.querySelectorAll('[data-open-component-sheet]').forEach(btn => btn.addEventListener('click', () => openComponentSheet(state.componentCatalog[Number(btn.dataset.openComponentSheet)])));
+    elements.componentsList.querySelectorAll('[data-open-component-sheet]').forEach(btn => btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openComponentSheet(state.componentCatalog[Number(btn.dataset.openComponentSheet)]);
+    }));
 }
 
 function formatAssetKind(kind) {
@@ -1830,7 +1834,7 @@ function componentSheetMarkup(payload) {
                 ${c.document_id && c.page_number ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación en plano</button>` : ''}
             </section>
             <aside class="component-sheet-docs">
-                ${payload.occurrences?.length ? `<h3>Apariciones en planos</h3><div class="component-assets-list">${payload.occurrences.slice(0,30).map(o => `<div class="component-asset-row"><span>Página ${o.page_number}${o.model ? ` · ${escapeHtml(o.model)}` : ''}</span><small>${escapeHtml(o.source_kind || 'plano')}</small></div>`).join('')}</div>` : ''}
+                ${payload.occurrence_summary?.page_count ? `<section class="component-occurrence-summary"><h3>Ubicaciones en planos</h3><div class="component-sheet-data compact"><div><dt>Página principal</dt><dd>${escapeHtml(String(c.page_number || '-'))}</dd></div><div><dt>Otras páginas</dt><dd>${escapeHtml((payload.occurrence_summary.pages || []).filter(p => Number(p) !== Number(c.page_number)).slice(0,12).join(', ') || 'Ninguna')}</dd></div><div><dt>Páginas únicas</dt><dd>${escapeHtml(String(payload.occurrence_summary.page_count || 0))}</dd></div><div><dt>Menciones detectadas</dt><dd>${escapeHtml(String(payload.occurrence_summary.total_mentions || 0))}</dd></div></div></section>` : ''}
                 <h3>Documentación asociada</h3>
                 <div class="component-assets-list">
                     ${assets.length ? assets.map(a => `<article class="component-asset"><div><strong>${escapeHtml(formatAssetKind(a.kind))}</strong><span>${escapeHtml(a.title || a.filename)}</span></div><div class="component-asset-actions"><a class="secondary-button" target="_blank" rel="noopener" href="${escapeHtml(a.download_url)}">Abrir</a><button type="button" class="icon-button" data-delete-asset="${a.id}" title="Eliminar">🗑</button></div></article>`).join('') : '<p class="muted-text">Todavía no se cargaron datasheets, manuales o planos propios.</p>'}
@@ -1854,6 +1858,7 @@ async function openComponentSheet(item) {
     dialog.className = 'relations-dialog component-sheet-dialog';
     dialog.innerHTML = `<div class="relations-dialog-body"><div class="loading-state">Cargando ficha técnica…</div></div>`;
     document.body.appendChild(dialog);
+    dialog.addEventListener('click', (event) => event.stopPropagation());
     dialog.addEventListener('close', () => dialog.remove());
     dialog.showModal();
 

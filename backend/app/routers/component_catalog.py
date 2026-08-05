@@ -44,6 +44,27 @@ MODEL_MANUFACTURER_RULES = (
     (re.compile(r"^(ACS|AF|MS116)", re.IGNORECASE), "ABB"),
 )
 
+
+
+NON_COMPONENT_EXACT = {
+    "PE", "N", "L", "L1", "L2", "L3", "L+", "L-", "+24V", "24V", "0V",
+    "M", "SH", "SHIELD", "SCHIRM",
+    "BN", "BK", "BU", "BL", "GY", "GN", "YE", "GNYE", "GN/YE", "RD", "WH", "OG", "VT",
+    "ST", "PIEZA", "RES",
+}
+NON_COMPONENT_PATTERNS = (
+    re.compile(r"^(?:L[123]|PE|N|0V|24V|\+24V|L\+|L-)$", re.IGNORECASE),
+    re.compile(r"^(?:BN|BK|BU|BL|GY|GN|YE|GNYE|GN/YE|RD|WH|OG|VT)$", re.IGNORECASE),
+)
+
+def is_nonphysical_reference(reference: str | None) -> bool:
+    """True para potenciales, colores y etiquetas que no representan un componente físico."""
+    raw = (reference or "").strip().upper()
+    compact = re.sub(r"\s+", "", raw)
+    if compact in NON_COMPONENT_EXACT:
+        return True
+    return any(pattern.fullmatch(compact) for pattern in NON_COMPONENT_PATTERNS)
+
 MANUFACTURER_DOMAINS = {
     "siemens": "siemens.com",
     "schneider": "se.com",
@@ -311,6 +332,9 @@ def _filtered_items(
     ).limit(hard_limit).all()
 
     items = [_row_to_item(row, search_normalized) for row in rows]
+    # La biblioteca contiene solo componentes físicos. Potenciales y colores siguen
+    # disponibles en Buscar, pero no generan fichas ni filas de Excel.
+    items = [item for item in items if not is_nonphysical_reference(item.get("reference"))]
     if component_type:
         wanted = component_type.strip().lower()
         items = [item for item in items if item["component_type"].lower() == wanted]

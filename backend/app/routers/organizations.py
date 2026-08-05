@@ -42,7 +42,15 @@ def create_organization(
 
     except IntegrityError:
         db.rollback()
-
+        existing = (
+            db.query(models.Organization)
+            .filter(models.Organization.name == name)
+            .first()
+        )
+        if existing is not None:
+            # Crear la misma empresa es una operación idempotente: se reutiliza
+            # el registro existente en vez de bloquear la interfaz con un 409.
+            return existing
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Ya existe una empresa con ese nombre",

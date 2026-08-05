@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
-from app.routers.component_catalog import _best_model_from_page, infer_manufacturer, infer_type, normalize_term
+from app.routers.component_catalog import _best_model_from_page, infer_manufacturer, infer_type, normalize_term, is_nonphysical_reference
 from app.services.storage_service import (
     delete_file,
     get_object_stream,
@@ -89,7 +89,17 @@ def component_library(reference_id: int, db: Session = Depends(get_db)):
                 "source_kind": related_ref.source_kind or "",
                 "model": _best_model_from_page(related_ref.reference or "", related_page.text_content, related_ref.model),
             })
-    occurrence_rows.sort(key=lambda row: (row["page_number"], row["id"]))
+    # Una sola aparición útil por página/modelo/origen. Las menciones repetidas en
+    # la misma página no se muestran como una lista interminable.
+    deduped_occurrences = []
+    seen_occurrences = set()
+    for row in sorted(occurrence_rows, key=lambda value: (value["page_number"], value["id"])):
+        key = (row.get("page_number"), normalize_term(row.get("model")), row.get("source_kind") or "")
+        if key in seen_occurrences:
+            continue
+        seen_occurrences.add(key)
+        deduped_occurrences.append(row)
+    unique_pages = sorted({row["page_number"] for row in deduped_occurrences if row.get("page_number") is not None})
     return {
         "component": {
             "id": ref.id,
@@ -107,7 +117,13 @@ def component_library(reference_id: int, db: Session = Depends(get_db)):
             "plant": plant.name if plant else "",
             "sector": sector.name if sector else "",
         },
-        "occurrences": occurrence_rows,
+        "occurrences": deduped_occurrences,
+        "occurrence_summary": {
+            "total_mentions": len(occurrence_rows),
+            "unique_occurrences": len(deduped_occurrences),
+            "page_count": len(unique_pages),
+            "pages": unique_pages,
+        },
         "assets": [_asset_payload(asset) for asset in assets],
     }
 

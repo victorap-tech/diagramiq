@@ -117,7 +117,7 @@ Archivos principales modificados:
 - Los archivos se guardan en el Bucket de Railway cuando está configurado, o localmente en desarrollo.
 - La navegación avanzada por planos continúa disponible en la sección Buscar.
 
-## v0.11.1 — Consolidación de componentes
+## v0.11.2 — Consolidación de componentes
 
 - Agrupa apariciones repetidas por referencia, documento y sector.
 - Toma el modelo técnico del texto cercano del plano y descarta otras referencias como modelo.
