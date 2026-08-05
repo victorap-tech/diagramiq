@@ -72,7 +72,7 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 - Acciones rápidas: Ver en plano y Ver relacionados.
 - Mantiene Anthropic/OpenAI, catálogo desde listas e indexación de la v0.10.3.
 
-## v0.10.8 - Catálogo y uso diario
+## v0.10.9 - Catálogo y uso diario
 
 Cambios implementados sobre v0.10.5:
 
@@ -83,7 +83,7 @@ Cambios implementados sobre v0.10.5:
 - Cada tarjeta indica por qué apareció en los resultados.
 - Botones Limpiar y Copiar respuesta en el asistente contextual.
 - Exportación del catálogo filtrado a Excel, con una fila por componente/página/sector y sin duplicados visuales.
-- Versión de API y frontend actualizada a 0.10.8.
+- Versión de API y frontend actualizada a 0.10.9.
 
 Archivos principales modificados:
 
@@ -94,14 +94,14 @@ Archivos principales modificados:
 - `backend/app/main.py`
 - `backend/requirements.txt`
 
-## v0.10.8 - Corrección del catálogo de componentes
+## v0.10.9 - Corrección del catálogo de componentes
 
 - Corrige la recursión infinita en `componentCatalogParams()`.
 - El catálogo vuelve a cargar respetando Empresa, Planta, Sector, Tipo y búsqueda.
 - La exportación Excel reutiliza exactamente los mismos filtros visibles.
 - Si la API falla, la interfaz muestra el error y deja de indicar carga.
 
-## v0.10.8 - Asistente con contexto de página
+## v0.10.9 - Asistente con contexto de página
 
 - El asistente recuerda la última página abierta en el visor.
 - Cuando una referencia se repite en distintos sectores, prioriza la instancia que el técnico está mirando.

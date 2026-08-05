@@ -1270,3 +1270,11 @@ textarea {
 .section-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .ai-question-actions { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .component-match-reason { display: inline-flex; margin: 0.35rem 0 0.15rem; padding: 0.25rem 0.55rem; border-radius: 999px; background: #eef6ff; color: #175aa8; font-size: 0.78rem; font-weight: 700; }
+
+/* v0.10.9: enlaces técnicos dentro de las acciones de componentes */
+.component-link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}

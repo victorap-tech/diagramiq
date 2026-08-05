@@ -1503,6 +1503,8 @@ function renderAiAnswer(response) {
             <div class="ai-card-actions">
                 <button type="button" class="primary-button ai-open-source" data-source-index="${Number(card.source_index || 0)}">Ver en plano</button>
                 <button type="button" class="secondary-button ai-search-related" data-reference="${escapeHtml(card.reference || "")}">Ver relacionados</button>
+                ${card.manual_url ? `<a class="secondary-button" href="${escapeHtml(card.manual_url)}" target="_blank" rel="noopener noreferrer">Manual oficial</a>` : ''}
+                ${card.product_url ? `<a class="secondary-button" href="${escapeHtml(card.product_url)}" target="_blank" rel="noopener noreferrer">Página oficial</a>` : ''}
             </div>
         </section>` : "";
 
@@ -1789,6 +1791,7 @@ function renderComponentCatalog(items) {
             ${item.match_reason ? `<div class="component-match-reason">${escapeHtml(item.match_reason)}</div>` : ''}
             <h3>${escapeHtml(item.reference || item.model || 'Sin referencia')}</h3>
             <div class="component-catalog-meta">
+                ${item.manufacturer ? `<strong>Fabricante:</strong> ${escapeHtml(item.manufacturer)}<br>` : ''}
                 ${item.model ? `<strong>Modelo:</strong> ${escapeHtml(item.model)}<br>` : ''}
                 ${escapeHtml(item.organization_name)} · ${escapeHtml(item.plant_name)} · ${escapeHtml(item.sector_name)}<br>
                 ${escapeHtml(item.document_title)} · página ${item.page_number}
@@ -1797,6 +1800,8 @@ function renderComponentCatalog(items) {
                 <button type="button" class="primary-button" data-open-component="${index}">Ver en plano</button>
                 <button type="button" class="secondary-button" data-relations-component="${index}">Ver relaciones</button>
                 <button type="button" class="secondary-button" data-graph-component="${index}">Seguir circuito</button>
+                ${item.manual_url ? `<a class="secondary-button component-link-button" href="${escapeHtml(item.manual_url)}" target="_blank" rel="noopener noreferrer">Manual oficial</a>` : ''}
+                ${item.product_url ? `<a class="secondary-button component-link-button" href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener noreferrer">Página oficial</a>` : ''}
             </div>
         </article>`).join('');
     elements.componentsList.querySelectorAll('[data-open-component]').forEach(btn => btn.addEventListener('click', () => openComponentInSearch(state.componentCatalog[Number(btn.dataset.openComponent)])));

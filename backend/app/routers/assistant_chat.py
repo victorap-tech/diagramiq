@@ -12,6 +12,7 @@ from app import models
 from app.database import get_db
 from app.services.pdf_service import extract_references, normalize_reference
 from app.services.vision_provider import ask_text
+from app.routers.component_catalog import official_component_links, infer_manufacturer, infer_type
 
 router = APIRouter(prefix="/assistant", tags=["Asistente IA"])
 
@@ -323,11 +324,19 @@ CONTEXTO INDEXADO:
         else:
             confidence_label = "Referencia documental"
             confidence_level = "document"
+        resolved_manufacturer = infer_manufacturer(primary.get("model"), primary.get("manufacturer"))
+        resolved_type = infer_type(
+            primary.get("reference") or "", primary.get("type"), primary.get("type"),
+            primary.get("model"), primary.get("description"),
+        )
+        official_links = official_component_links(resolved_manufacturer, primary.get("model"))
         component_card = {
             "reference": primary.get("reference") or "",
-            "type": primary.get("type") or "",
-            "manufacturer": primary.get("manufacturer") or "",
+            "type": resolved_type,
+            "manufacturer": resolved_manufacturer,
             "model": primary.get("model") or "",
+            "product_url": official_links.get("product_url", ""),
+            "manual_url": official_links.get("manual_url", ""),
             "description": primary.get("description") or "",
             "organization": primary.get("organization") or "",
             "plant": primary.get("plant") or "",

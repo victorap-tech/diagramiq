@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from io import BytesIO
 from typing import Any
+from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -20,7 +21,7 @@ router = APIRouter(prefix="/component-catalog", tags=["Catálogo de componentes"
 TYPE_MAP = {
     "qf": "interruptor", "qs": "seccionador", "gv": "guardamotor",
     "km": "contactor", "ka": "relé", "fr": "relé térmico", "fu": "fusible",
-    "vfd": "variador", "uf": "variador", "atv": "variador", "fc": "variador",
+    "vfd": "variador", "uf": "variador", "atv": "variador",
     "plc": "PLC", "di": "módulo de entradas", "do": "módulo de salidas",
     "ai": "módulo analógico", "ao": "módulo analógico", "m": "motor",
     "b": "sensor", "x": "bornera", "xt": "bornera", "h": "piloto",
@@ -28,12 +29,104 @@ TYPE_MAP = {
 }
 
 
-def infer_type(reference: str, detected: str | None, component_type: str | None) -> str:
+MODEL_TYPE_RULES = (
+    (re.compile(r"^3RV", re.IGNORECASE), "guardamotor"),
+    (re.compile(r"^3RT", re.IGNORECASE), "contactor"),
+    (re.compile(r"^(ATV|ALTIVAR)", re.IGNORECASE), "variador"),
+    (re.compile(r"^(FC-|FC\s)?\d{2,4}", re.IGNORECASE), "variador"),
+    (re.compile(r"^6ES7", re.IGNORECASE), "módulo PLC"),
+)
+
+MODEL_MANUFACTURER_RULES = (
+    (re.compile(r"^(3RV|3RT|6ES7|6SL)", re.IGNORECASE), "Siemens"),
+    (re.compile(r"^(ATV|LC1D|GV2|TM3|BMX)", re.IGNORECASE), "Schneider Electric"),
+    (re.compile(r"^(FC-|VLT)", re.IGNORECASE), "Danfoss"),
+    (re.compile(r"^(ACS|AF|MS116)", re.IGNORECASE), "ABB"),
+)
+
+MANUFACTURER_DOMAINS = {
+    "siemens": "siemens.com",
+    "schneider": "se.com",
+    "schneider electric": "se.com",
+    "danfoss": "danfoss.com",
+    "abb": "abb.com",
+    "sew": "sew-eurodrive.com",
+    "sew-eurodrive": "sew-eurodrive.com",
+    "rockwell": "rockwellautomation.com",
+    "allen-bradley": "rockwellautomation.com",
+    "omron": "omron.com",
+    "sick": "sick.com",
+    "ifm": "ifm.com",
+    "festo": "festo.com",
+    "wago": "wago.com",
+    "phoenix": "phoenixcontact.com",
+    "weidmuller": "weidmueller.com",
+    "weidmüller": "weidmueller.com",
+    "eaton": "eaton.com",
+}
+
+
+def infer_manufacturer(model: str | None, manufacturer: str | None) -> str:
+    current = (manufacturer or "").strip()
+    if current:
+        return current
+    clean_model = (model or "").strip()
+    for pattern, name in MODEL_MANUFACTURER_RULES:
+        if pattern.search(clean_model):
+            return name
+    return ""
+
+
+def _model_type(model: str | None) -> str:
+    clean_model = (model or "").strip()
+    for pattern, component_type in MODEL_TYPE_RULES:
+        if pattern.search(clean_model):
+            return component_type
+    return ""
+
+
+def official_component_links(manufacturer: str | None, model: str | None) -> dict[str, str]:
+    """Genera búsquedas acotadas al sitio oficial sin inventar una URL de producto."""
+    maker = (manufacturer or "").strip()
+    part = (model or "").strip()
+    if not part:
+        return {"product_url": "", "manual_url": ""}
+    domain = MANUFACTURER_DOMAINS.get(maker.lower())
+    if not domain:
+        return {"product_url": "", "manual_url": ""}
+    product_query = quote_plus(f"site:{domain} {part}")
+    manual_query = quote_plus(f"site:{domain} {part} manual OR datasheet PDF")
+    return {
+        "product_url": f"https://www.google.com/search?q={product_query}",
+        "manual_url": f"https://www.google.com/search?q={manual_query}",
+    }
+
+
+def infer_type(reference: str, detected: str | None, component_type: str | None, model: str | None = None, description: str | None = None) -> str:
+    model_type = _model_type(model)
+    if model_type:
+        return model_type
+    context = " ".join(filter(None, (detected, component_type, description))).strip().lower()
+    for keyword, label in (
+        ("guardamotor", "guardamotor"),
+        ("protector de motor", "guardamotor"),
+        ("contactor", "contactor"),
+        ("relé térmico", "relé térmico"),
+        ("rele termico", "relé térmico"),
+        ("variador", "variador"),
+        ("motor", "motor"),
+        ("sensor", "sensor"),
+        ("fin de carrera", "contacto o fin de carrera"),
+    ):
+        if keyword in context:
+            return label
     for value in (detected, component_type):
-        if value and value.strip():
+        if value and value.strip() and value.strip().lower() not in {"referencia técnica", "referencia fc"}:
             return value.strip().lower()
     ref = (reference or "").strip().lower()
     prefix = "".join(ch for ch in ref if ch.isalpha())
+    if prefix.startswith("fc"):
+        return "referencia FC"
     for key in sorted(TYPE_MAP, key=len, reverse=True):
         if prefix.startswith(key):
             return TYPE_MAP[key]
@@ -100,12 +193,18 @@ def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str,
         elif search_normalized and search_normalized in normalize_term(row_text):
             match_rank, match_reason = 4, "Mencionado en la descripción"
 
+    manufacturer = infer_manufacturer(model, getattr(ref, "manufacturer", None))
+    component_type = infer_type(reference, ref.detected_type, ref.component_type, model, ref.description or row_text)
+    links = official_component_links(manufacturer, model)
+
     return {
         "id": ref.id,
         "reference": reference,
-        "component_type": infer_type(reference, ref.detected_type, ref.component_type),
+        "component_type": component_type,
         "model": model,
-        "manufacturer": getattr(ref, "manufacturer", None) or "",
+        "manufacturer": manufacturer,
+        "product_url": links["product_url"],
+        "manual_url": links["manual_url"],
         "source_kind": getattr(ref, "source_kind", None) or "",
         "catalog_confidence": getattr(ref, "catalog_confidence", 0) or 0,
         "description": ref.description or row_text,
@@ -197,33 +296,47 @@ def export_components_excel(
     q: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Exporta el catálogo respetando exactamente los filtros visibles."""
+    """Exporta una hoja técnica consolidada y otra con todas las apariciones."""
     items = _filtered_items(
         db, organization_id, plant_id, sector_id, component_type, q, hard_limit=50000
     )
 
-    # Una fila por referencia/modelo/página/sector para evitar duplicados visuales.
-    unique: list[dict[str, Any]] = []
-    seen: set[tuple[Any, ...]] = set()
-    for item in items:
-        key = (
-            normalize_term(item["reference"]),
-            normalize_term(item["model"]),
-            item["sector_id"],
-            item["document_id"],
-            item["page_number"],
+    def quality(item: dict[str, Any]) -> tuple[int, int, int, int, int]:
+        model = (item.get("model") or "").upper()
+        reliable_model = bool(re.match(r"^(3RV|3RT|6ES7|6SL|ATV|LC1D|GV2|FC-|VLT|ACS|AF|MS116)", model))
+        source = (item.get("source_kind") or "").lower()
+        component_type_value = (item.get("component_type") or "").lower()
+        return (
+            1 if reliable_model else 0,
+            1 if source == "catalog+plan" else 0,
+            1 if item.get("manufacturer") else 0,
+            int(item.get("catalog_confidence") or 0),
+            1 if component_type_value not in {"otro", "referencia técnica", "referencia fc"} else 0,
         )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(item)
+
+    # Una ficha por referencia/modelo/sector. Si hay varias apariciones, conserva la más rica.
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in items:
+        reliable_model = normalize_term(item.get("model"))
+        key = (
+            normalize_term(item.get("reference")),
+            reliable_model if reliable_model else "SINMODELO",
+            item.get("sector_id"),
+        )
+        previous = grouped.get(key)
+        if previous is None or quality(item) > quality(previous):
+            grouped[key] = item
+    unique = sorted(grouped.values(), key=lambda x: (
+        normalize_term(x.get("reference")), x.get("sector_name") or "", x.get("page_number") or 0
+    ))
 
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Componentes"
+    sheet.title = "Componentes únicos"
     headers = [
-        "Referencia", "Tipo", "Fabricante", "Modelo", "Empresa", "Planta",
-        "Sector", "Documento", "Página", "Confianza", "Origen", "Descripción",
+        "Referencia", "Tipo", "Fabricante", "Modelo completo", "Función / descripción",
+        "Empresa", "Planta", "Sector", "Documento", "Página principal",
+        "Confianza", "Origen", "Página oficial", "Manual / ficha técnica",
     ]
     sheet.append(headers)
     for cell in sheet[1]:
@@ -231,27 +344,63 @@ def export_components_excel(
         cell.alignment = Alignment(horizontal="center")
 
     for item in unique:
-        sheet.append([
+        row = [
             item["reference"], item["component_type"], item["manufacturer"],
-            item["model"], item["organization_name"], item["plant_name"],
-            item["sector_name"], item["document_title"], item["page_number"],
-            item["catalog_confidence"], item["source_kind"], item["description"],
+            item["model"], item["description"], item["organization_name"],
+            item["plant_name"], item["sector_name"], item["document_title"],
+            item["page_number"], item["catalog_confidence"], item["source_kind"],
+            "Abrir producto oficial" if item.get("product_url") else "",
+            "Buscar manual oficial" if item.get("manual_url") else "",
+        ]
+        sheet.append(row)
+        row_index = sheet.max_row
+        if item.get("product_url"):
+            sheet.cell(row_index, 13).hyperlink = item["product_url"]
+            sheet.cell(row_index, 13).style = "Hyperlink"
+        if item.get("manual_url"):
+            sheet.cell(row_index, 14).hyperlink = item["manual_url"]
+            sheet.cell(row_index, 14).style = "Hyperlink"
+
+    occurrences = workbook.create_sheet("Apariciones")
+    occurrence_headers = [
+        "Referencia", "Tipo", "Fabricante", "Modelo", "Empresa", "Planta", "Sector",
+        "Documento", "Página", "Origen", "Descripción",
+    ]
+    occurrences.append(occurrence_headers)
+    for cell in occurrences[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    seen_occurrences: set[tuple[Any, ...]] = set()
+    for item in items:
+        key = (item["id"], item["document_id"], item["page_number"])
+        if key in seen_occurrences:
+            continue
+        seen_occurrences.add(key)
+        occurrences.append([
+            item["reference"], item["component_type"], item["manufacturer"], item["model"],
+            item["organization_name"], item["plant_name"], item["sector_name"],
+            item["document_title"], item["page_number"], item["source_kind"], item["description"],
         ])
 
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-    widths = [20, 22, 20, 28, 22, 22, 24, 34, 10, 12, 18, 60]
+    for current in (sheet, occurrences):
+        current.freeze_panes = "A2"
+        current.auto_filter.ref = current.dimensions
+        for row in current.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+    widths = [18, 24, 22, 30, 55, 22, 22, 25, 35, 14, 12, 18, 24, 28]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
-    for row in sheet.iter_rows(min_row=2):
-        row[-1].alignment = Alignment(wrap_text=True, vertical="top")
+    occurrence_widths = [18, 24, 22, 30, 22, 22, 25, 35, 10, 18, 60]
+    for index, width in enumerate(occurrence_widths, start=1):
+        occurrences.column_dimensions[get_column_letter(index)].width = width
 
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-    filename = "diagramiq-componentes.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": 'attachment; filename="diagramiq-componentes.xlsx"'},
     )
+

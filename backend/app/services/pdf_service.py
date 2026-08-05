@@ -92,7 +92,7 @@ def classify_reference(reference: str) -> str:
         return "Interruptor o actuador"
 
     if value.startswith("FC"):
-        return "Contacto o fin de carrera"
+        return "Referencia FC"
 
     if value.startswith("QS"):
         return "Seccionador"
@@ -296,6 +296,7 @@ def analyze_context_text(row_text: str | None, search_text: str) -> dict:
     type_rules = [
         ("INTERRUPTOR GUARDAMOTOR", "Guardamotor"),
         ("GUARDAMOTOR", "Guardamotor"),
+        ("PROTECTOR DE MOTOR", "Guardamotor"),
         ("CONTACTOR", "Contactor"),
         ("RELÉ TÉRMICO", "Relé térmico"),
         ("RELE TERMICO", "Relé térmico"),
@@ -311,12 +312,14 @@ def analyze_context_text(row_text: str | None, search_text: str) -> dict:
     ]
     detected_type = next((label for key, label in type_rules if key in upper), None)
     candidates = re.findall(
-        r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|[A-Z]{2,}\d{2,}[A-Z0-9-]*)\b",
+        r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|6ES7[A-Z0-9-]+|6SL[A-Z0-9-]+|ATV[A-Z0-9-]+|LC1D[A-Z0-9-]+|GV2[A-Z0-9-]+|FC-?\d{2,4}[A-Z0-9-]*|VLT[A-Z0-9-]+|ACS[A-Z0-9-]+)\b",
         combined, re.IGNORECASE,
     )
-    model = next((x for x in candidates if x.upper().startswith(("3RV", "3RT"))), None)
-    if model is None:
-        model = next((x for x in candidates if x.upper() != search_text.upper()), None)
+    model = next((x for x in candidates if x.upper() != search_text.upper()), None)
+    if model and model.upper().startswith("3RV") and not detected_type:
+        detected_type = "Guardamotor"
+    elif model and model.upper().startswith("3RT") and not detected_type:
+        detected_type = "Contactor"
     description = None
     if combined:
         description = re.sub(re.escape(search_text), "", combined, flags=re.IGNORECASE)
@@ -587,6 +590,7 @@ def extract_match_context(
 
         type_rules = [
             ("GUARDAMOTOR", "Guardamotor"),
+        ("PROTECTOR DE MOTOR", "Guardamotor"),
             ("INTERRUPTOR GUARDAMOTOR", "Guardamotor"),
             ("CONTACTOR", "Contactor"),
             ("RELÉ TÉRMICO", "Relé térmico"),
