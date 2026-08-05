@@ -63,3 +63,11 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 - Enriquece las apariciones del plano con tipo, modelo, fabricante y descripción.
 - Las listas ayudan a indexar, pero siguen quedando detrás de los planos en la búsqueda.
 - Muestra la etapa “Leyendo listas de componentes” en la barra de progreso.
+
+## v0.10.4 - Respuesta técnica estructurada
+
+- Ficha técnica del componente antes de la explicación de la IA.
+- Indicador de confianza según catálogo/lista y plano.
+- Fuentes clicables que abren la página correspondiente y resaltan la referencia.
+- Acciones rápidas: Ver en plano y Ver relacionados.
+- Mantiene Anthropic/OpenAI, catálogo desde listas e indexación de la v0.10.3.

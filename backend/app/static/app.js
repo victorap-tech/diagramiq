@@ -1466,15 +1466,65 @@ function renderAiAnswer(response) {
     if (!elements.aiAnswer) return;
     const answer = escapeHtml(String(response?.answer || "")).replace(/\n/g, "<br>");
     const sources = Array.isArray(response?.sources) ? response.sources : [];
+    const card = response?.component_card || null;
+
+    const cardRows = card ? [
+        ["Referencia", card.reference],
+        ["Tipo", card.type],
+        ["Fabricante", card.manufacturer],
+        ["Modelo", card.model],
+        ["Descripción", card.description],
+        ["Ubicación", [card.organization, card.plant, card.sector].filter(Boolean).join(" · ")],
+        ["Documento", card.document_title],
+        ["Página", card.page_number],
+    ].filter(([, value]) => String(value ?? "").trim()) : [];
+
+    const confidenceClass = card?.confidence_level || "document";
+    const cardHtml = card ? `
+        <section class="ai-component-card">
+            <div class="ai-component-card-header">
+                <div>
+                    <small>Componente identificado</small>
+                    <h3>${escapeHtml(card.reference || "Componente")}</h3>
+                </div>
+                <span class="ai-confidence ${escapeHtml(confidenceClass)}">${escapeHtml(card.confidence_label || "Información indexada")}</span>
+            </div>
+            <div class="ai-component-grid">
+                ${cardRows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
+            </div>
+            <div class="ai-card-actions">
+                <button type="button" class="primary-button ai-open-source" data-source-index="${Number(card.source_index || 0)}">Ver en plano</button>
+                <button type="button" class="secondary-button ai-search-related" data-reference="${escapeHtml(card.reference || "")}">Ver relacionados</button>
+            </div>
+        </section>` : "";
+
     const sourceHtml = sources.length
         ? `<div class="ai-source-list"><strong>Fuentes consultadas</strong>${sources.map((source, index) => `
-            <div class="ai-source-item">
+            <button type="button" class="ai-source-item ai-open-source" data-source-index="${index}">
                 <span>[Fuente ${index + 1}]</span>
                 <div>${escapeHtml(source.document_title || "Documento")} · página ${escapeHtml(String(source.page_number || "-"))}${source.reference ? ` · ${escapeHtml(source.reference)}` : ""}</div>
-            </div>`).join("")}</div>`
+            </button>`).join("")}</div>`
         : "";
-    elements.aiAnswer.innerHTML = `<div class="ai-answer-text">${answer}</div>${sourceHtml}`;
+
+    elements.aiAnswer.innerHTML = `${cardHtml}<div class="ai-answer-heading">Explicación técnica</div><div class="ai-answer-text">${answer}</div>${sourceHtml}`;
     elements.aiAnswer.classList.remove("hidden");
+
+    elements.aiAnswer.querySelectorAll(".ai-open-source").forEach((button) => {
+        button.addEventListener("click", () => {
+            const index = Number(button.dataset.sourceIndex || 0);
+            const source = sources[index];
+            if (source) openViewer(source, null);
+        });
+    });
+    elements.aiAnswer.querySelectorAll(".ai-search-related").forEach((button) => {
+        button.addEventListener("click", () => {
+            const reference = String(button.dataset.reference || "").trim();
+            if (!reference) return;
+            elements.searchInput.value = reference;
+            elements.searchForm?.requestSubmit();
+        });
+    });
+
     if (elements.aiProviderBadge) {
         elements.aiProviderBadge.textContent = `${response?.provider || "IA"} · ${response?.model || ""}`;
     }

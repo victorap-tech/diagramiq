@@ -91,12 +91,22 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "reference": ref.reference,
                 "type": ref.detected_type or ref.component_type or "",
                 "model": ref.model or "",
+                "manufacturer": ref.manufacturer or "",
                 "description": ref.description or ref.row_text or "",
+                "confidence": int(ref.catalog_confidence or 0),
+                "source_kind": ref.source_kind or page.page_type or "plan",
                 "page_number": page.page_number,
+                "page_id": page.id,
+                "document_id": doc.id,
                 "document_title": doc.title,
                 "organization": org.name,
                 "plant": plant.name,
                 "sector": sector.name,
+                "image_url": f"/documents/pages/{page.id}/image",
+                "x": ref.x,
+                "y": ref.y,
+                "width": ref.width,
+                "height": ref.height,
                 "text": (page.text_content or "")[:2800],
             })
 
@@ -113,12 +123,22 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "reference": "",
                 "type": "",
                 "model": "",
+                "manufacturer": "",
                 "description": "",
+                "confidence": 0,
+                "source_kind": page.page_type or "unknown",
                 "page_number": page.page_number,
+                "page_id": page.id,
+                "document_id": doc.id,
                 "document_title": doc.title,
                 "organization": org.name,
                 "plant": plant.name,
                 "sector": sector.name,
+                "image_url": f"/documents/pages/{page.id}/image",
+                "x": None,
+                "y": None,
+                "width": None,
+                "height": None,
                 "text": (page.text_content or "")[:2800],
             })
             if len(snippets) >= 8:
@@ -151,18 +171,27 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             value for value in [
                 f"Referencia: {item['reference']}" if item['reference'] else "",
                 f"Tipo: {item['type']}" if item['type'] else "",
+                f"Fabricante: {item['manufacturer']}" if item['manufacturer'] else "",
                 f"Modelo: {item['model']}" if item['model'] else "",
                 f"Descripción: {item['description']}" if item['description'] else "",
             ] if value
         )
         context_blocks.append(f"{header}\n{details}\nTexto indexado:\n{item['text']}")
         sources.append({
+            "document_id": item["document_id"],
+            "page_id": item["page_id"],
             "document_title": item["document_title"],
             "page_number": item["page_number"],
             "reference": item["reference"],
             "organization": item["organization"],
             "plant": item["plant"],
             "sector": item["sector"],
+            "image_url": item["image_url"],
+            "x": item["x"],
+            "y": item["y"],
+            "width": item["width"],
+            "height": item["height"],
+            "source_kind": item["source_kind"],
         })
 
     prompt = f"""Sos DiagramIQ, un asistente técnico de mantenimiento industrial.
@@ -183,10 +212,61 @@ CONTEXTO INDEXADO:
 {chr(10).join(chr(10) + block for block in context_blocks)}
 """
     response = ask_text(prompt, max_tokens=1000)
+
+    component_candidates = [
+        item for item in snippets
+        if item.get("reference") and (
+            item.get("type") or item.get("model") or item.get("manufacturer")
+        )
+    ]
+    component_candidates.sort(
+        key=lambda item: (
+            1 if item.get("source_kind") == "plan" else 0,
+            int(item.get("confidence") or 0),
+            1 if item.get("model") else 0,
+            1 if item.get("manufacturer") else 0,
+        ),
+        reverse=True,
+    )
+    primary = component_candidates[0] if component_candidates else None
+    component_card = None
+    if primary:
+        confidence = int(primary.get("confidence") or 0)
+        if primary.get("source_kind") == "plan" and confidence >= 80:
+            confidence_label = "Confirmado por lista y plano"
+            confidence_level = "confirmed"
+        elif primary.get("source_kind") == "plan":
+            confidence_label = "Confirmado en plano"
+            confidence_level = "plan"
+        else:
+            confidence_label = "Referencia documental"
+            confidence_level = "document"
+        component_card = {
+            "reference": primary.get("reference") or "",
+            "type": primary.get("type") or "",
+            "manufacturer": primary.get("manufacturer") or "",
+            "model": primary.get("model") or "",
+            "description": primary.get("description") or "",
+            "organization": primary.get("organization") or "",
+            "plant": primary.get("plant") or "",
+            "sector": primary.get("sector") or "",
+            "document_title": primary.get("document_title") or "",
+            "page_number": primary.get("page_number"),
+            "confidence": confidence,
+            "confidence_label": confidence_label,
+            "confidence_level": confidence_level,
+            "source_index": next((
+                index for index, source in enumerate(sources)
+                if source.get("page_id") == primary.get("page_id")
+            ), 0),
+        }
+
     return {
         "answer": response.text,
         "provider": response.provider,
         "model": response.model,
         "sources": sources,
+        "component_card": component_card,
+        "detected_references": references,
         "context_count": len(sources),
     }

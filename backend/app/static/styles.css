@@ -1231,3 +1231,22 @@ textarea {
 .document-progress-details { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:8px; color:#607080; font-size:.78rem; }
 .document-card:has(.status-badge.processing) .document-progress-fill { background:linear-gradient(90deg,#315f8d,#68a9df); }
 @media (max-width:640px) { .document-progress-details { display:grid; grid-template-columns:1fr 1fr; } }
+
+/* Asistente contextual v0.10.4 */
+.ai-component-card { margin:0 0 16px; border:1px solid #bcd3e7; border-radius:16px; background:#fff; padding:16px; box-shadow:0 8px 24px rgba(36,68,98,.06); }
+.ai-component-card-header { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; margin-bottom:14px; }
+.ai-component-card-header small { color:#587188; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+.ai-component-card-header h3 { margin:4px 0 0; font-size:1.45rem; color:#173c61; }
+.ai-confidence { border-radius:999px; padding:7px 11px; font-size:.78rem; font-weight:800; white-space:nowrap; }
+.ai-confidence.confirmed { background:#dff5e8; color:#17643a; }
+.ai-confidence.plan { background:#e4f0fb; color:#225d91; }
+.ai-confidence.document { background:#fff2d7; color:#805b12; }
+.ai-component-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+.ai-component-grid div { background:#f5f9fc; border-radius:10px; padding:10px 12px; display:grid; gap:3px; }
+.ai-component-grid span { font-size:.76rem; color:#66798a; font-weight:700; }
+.ai-component-grid strong { color:#22384c; overflow-wrap:anywhere; }
+.ai-card-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+.ai-answer-heading { margin:4px 0 10px; font-weight:900; color:#224e78; }
+.ai-source-item { width:100%; border:0; background:#f2f7fb; border-radius:10px; padding:10px; text-align:left; cursor:pointer; }
+.ai-source-item:hover { background:#e5f0f8; }
+@media (max-width:640px) { .ai-component-card-header { flex-direction:column; } .ai-confidence { white-space:normal; } }
