@@ -141,6 +141,64 @@ def normalize_term(value: str | None) -> str:
     return re.sub(r"[^A-Z0-9]", "", text)
 
 
+RELIABLE_MODEL_RE = re.compile(
+    r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|6ES7[A-Z0-9-]+|6SL[A-Z0-9-]+|"
+    r"ATV[A-Z0-9-]+|LC1D[A-Z0-9-]+|GV2[A-Z0-9-]+|VLT[A-Z0-9-]+|ACS[A-Z0-9-]+|"
+    r"MS116[A-Z0-9-]*|AF\d+[A-Z0-9-]*)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_reliable_model(value: str | None) -> bool:
+    return bool(RELIABLE_MODEL_RE.fullmatch((value or "").strip()))
+
+
+def _best_model_from_page(reference: str, page_text: str | None, current_model: str | None) -> str:
+    """Recupera el modelo real desde el texto cercano del plano.
+
+    Evita aceptar otra referencia (por ejemplo FC061) como modelo de FC011.
+    """
+    current = (current_model or "").strip()
+    if _is_reliable_model(current):
+        return current
+    text = page_text or ""
+    if not text:
+        return ""
+    candidates = list(RELIABLE_MODEL_RE.finditer(text))
+    if not candidates:
+        return ""
+    ref = (reference or "").strip()
+    ref_positions = [m.start() for m in re.finditer(re.escape(ref), text, re.IGNORECASE)] if ref else []
+    if not ref_positions:
+        # Si la página tiene un solo modelo técnico inequívoco, se puede usar.
+        unique = []
+        seen = set()
+        for match in candidates:
+            value = match.group(0).upper()
+            if value not in seen:
+                seen.add(value)
+                unique.append(match.group(0))
+        return unique[0] if len(unique) == 1 else ""
+    best = min(
+        candidates,
+        key=lambda match: min(abs(match.start() - pos) for pos in ref_positions),
+    )
+    distance = min(abs(best.start() - pos) for pos in ref_positions)
+    # Ventana suficientemente amplia para rótulos verticales, sin mezclar toda la página.
+    return best.group(0) if distance <= 500 else ""
+
+
+def _description_score(value: str | None) -> int:
+    text = (value or "").strip()
+    if not text:
+        return 0
+    score = min(len(text), 240)
+    for keyword in ("TRANSPORT", "MOTOR", "BOMBA", "VENTIL", "IZQUIER", "DERECH", "LUBRIC"):
+        if keyword in text.upper():
+            score += 80
+    return score
+
+
 def _base_query(
     db: Session,
     organization_id: int | None,
@@ -174,8 +232,8 @@ def _base_query(
 def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str, Any]:
     ref, page, doc, sector, plant, org = row
     reference = ref.reference or ""
-    model = ref.model or ""
     row_text = ref.row_text or ""
+    model = _best_model_from_page(reference, page.text_content, ref.model)
     normalized_reference = normalize_term(reference)
     normalized_model = normalize_term(model)
 
@@ -280,11 +338,63 @@ def list_components(
     limit: int = Query(default=500, ge=1, le=2000),
     db: Session = Depends(get_db),
 ):
-    items = _filtered_items(
+    raw_items = _filtered_items(
         db, organization_id, plant_id, sector_id, component_type, q, hard_limit=10000
-    )[:limit]
-    counts = Counter(item["component_type"] for item in items)
-    return {"items": items, "counts": dict(sorted(counts.items())), "total": len(items)}
+    )
+
+    # Consolida apariciones repetidas: una ficha por referencia real, documento y sector.
+    # Las menciones en listas, contactos auxiliares y referencias cruzadas quedan agrupadas.
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    occurrences: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+    def quality(item: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
+        source = (item.get("source_kind") or "").lower()
+        model = item.get("model") or ""
+        return (
+            1 if _is_reliable_model(model) else 0,
+            1 if source in {"schematic", "plan", "catalog+plan"} else 0,
+            1 if item.get("manufacturer") else 0,
+            int(item.get("catalog_confidence") or 0),
+            _description_score(item.get("description")),
+            1 if item.get("x") is not None and item.get("y") is not None else 0,
+        )
+
+    for item in raw_items:
+        key = (
+            normalize_term(item.get("reference")),
+            item.get("document_id"),
+            item.get("sector_id"),
+        )
+        occurrences.setdefault(key, []).append(item)
+        current = grouped.get(key)
+        if current is None or quality(item) > quality(current):
+            grouped[key] = dict(item)
+
+    consolidated = []
+    for key, item in grouped.items():
+        rows = occurrences[key]
+        pages = sorted({int(row["page_number"]) for row in rows if row.get("page_number") is not None})
+        item["occurrence_count"] = len(rows)
+        item["page_count"] = len(pages)
+        item["occurrence_pages"] = pages[:50]
+        # Completa tipo y fabricante después de recuperar el mejor modelo de plano.
+        item["manufacturer"] = infer_manufacturer(item.get("model"), item.get("manufacturer"))
+        item["component_type"] = infer_type(
+            item.get("reference") or "", item.get("component_type"), item.get("component_type"),
+            item.get("model"), item.get("description"),
+        )
+        item.update(official_component_links(item.get("manufacturer"), item.get("model")))
+        consolidated.append(item)
+
+    consolidated.sort(key=lambda item: (
+        item.get("match_rank", 99),
+        normalize_term(item.get("reference")),
+        item.get("sector_name") or "",
+        item.get("document_title") or "",
+    ))
+    consolidated = consolidated[:limit]
+    counts = Counter(item["component_type"] for item in consolidated)
+    return {"items": consolidated, "counts": dict(sorted(counts.items())), "total": len(consolidated)}
 
 
 @router.get("/export.xlsx")

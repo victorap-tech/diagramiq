@@ -116,3 +116,11 @@ Archivos principales modificados:
 - Permite asociar y abrir datasheets, manuales, planos del componente, fotografías y otros documentos.
 - Los archivos se guardan en el Bucket de Railway cuando está configurado, o localmente en desarrollo.
 - La navegación avanzada por planos continúa disponible en la sección Buscar.
+
+## v0.11.1 — Consolidación de componentes
+
+- Agrupa apariciones repetidas por referencia, documento y sector.
+- Toma el modelo técnico del texto cercano del plano y descarta otras referencias como modelo.
+- Prioriza modelos industriales completos (3RV, 3RT, 6ES7, ATV, etc.).
+- Muestra cantidad de apariciones y páginas en cada ficha.
+- La ficha reúne las apariciones secundarias sin crear tarjetas duplicadas.

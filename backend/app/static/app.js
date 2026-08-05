@@ -1793,8 +1793,9 @@ function renderComponentCatalog(items) {
             <h3>${escapeHtml(item.reference || 'Sin referencia')}</h3>
             <p class="component-catalog-meta">
                 ${item.manufacturer ? `<strong>${escapeHtml(item.manufacturer)}</strong><br>` : ''}
-                ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : ''}
-                ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}
+                ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : '<span class="muted">Modelo pendiente de confirmar</span><br>'}
+                ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}<br>
+                ${item.occurrence_count ? `${item.occurrence_count} apariciones · ${item.page_count || 0} páginas` : ''}
             </p>
             <div class="component-catalog-actions">
                 <button type="button" class="primary-button" data-open-component-sheet="${index}">Abrir ficha</button>
@@ -1829,6 +1830,7 @@ function componentSheetMarkup(payload) {
                 ${c.document_id && c.page_number ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación en plano</button>` : ''}
             </section>
             <aside class="component-sheet-docs">
+                ${payload.occurrences?.length ? `<h3>Apariciones en planos</h3><div class="component-assets-list">${payload.occurrences.slice(0,30).map(o => `<div class="component-asset-row"><span>Página ${o.page_number}${o.model ? ` · ${escapeHtml(o.model)}` : ''}</span><small>${escapeHtml(o.source_kind || 'plano')}</small></div>`).join('')}</div>` : ''}
                 <h3>Documentación asociada</h3>
                 <div class="component-assets-list">
                     ${assets.length ? assets.map(a => `<article class="component-asset"><div><strong>${escapeHtml(formatAssetKind(a.kind))}</strong><span>${escapeHtml(a.title || a.filename)}</span></div><div class="component-asset-actions"><a class="secondary-button" target="_blank" rel="noopener" href="${escapeHtml(a.download_url)}">Abrir</a><button type="button" class="icon-button" data-delete-asset="${a.id}" title="Eliminar">🗑</button></div></article>`).join('') : '<p class="muted-text">Todavía no se cargaron datasheets, manuales o planos propios.</p>'}

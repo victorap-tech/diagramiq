@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
+from app.routers.component_catalog import _best_model_from_page, infer_manufacturer, infer_type, normalize_term
 from app.services.storage_service import (
     delete_file,
     get_object_stream,
@@ -65,13 +66,37 @@ def component_library(reference_id: int, db: Session = Depends(get_db)):
         .order_by(models.ComponentAsset.created_at.desc(), models.ComponentAsset.id.desc())
         .all()
     )
+    model = _best_model_from_page(ref.reference or "", page.text_content if page else "", ref.model)
+    manufacturer = infer_manufacturer(model, ref.manufacturer)
+    component_type = infer_type(
+        ref.reference or "", ref.detected_type, ref.component_type, model, ref.description or ref.row_text
+    )
+    occurrence_rows = []
+    if document and sector:
+        related = (
+            db.query(models.ComponentReference, models.DocumentPage)
+            .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
+            .filter(models.DocumentPage.document_id == document.id)
+            .all()
+        )
+        target = normalize_term(ref.reference)
+        for related_ref, related_page in related:
+            if normalize_term(related_ref.reference) != target:
+                continue
+            occurrence_rows.append({
+                "id": related_ref.id,
+                "page_number": related_page.page_number,
+                "source_kind": related_ref.source_kind or "",
+                "model": _best_model_from_page(related_ref.reference or "", related_page.text_content, related_ref.model),
+            })
+    occurrence_rows.sort(key=lambda row: (row["page_number"], row["id"]))
     return {
         "component": {
             "id": ref.id,
             "reference": ref.reference or "",
-            "type": ref.detected_type or ref.component_type or "",
-            "manufacturer": ref.manufacturer or "",
-            "model": ref.model or "",
+            "type": component_type,
+            "manufacturer": manufacturer,
+            "model": model,
             "description": ref.description or ref.row_text or "",
             "confidence": ref.catalog_confidence or 0,
             "source_kind": ref.source_kind or "",
@@ -82,6 +107,7 @@ def component_library(reference_id: int, db: Session = Depends(get_db)):
             "plant": plant.name if plant else "",
             "sector": sector.name if sector else "",
         },
+        "occurrences": occurrence_rows,
         "assets": [_asset_payload(asset) for asset in assets],
     }
 
