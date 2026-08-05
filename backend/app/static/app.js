@@ -1765,6 +1765,40 @@ function renderComponentSummary(counts) {
     }));
 }
 
+function componentViewerResult(item) {
+    const reference = item.channel_reference || item.display_reference || item.reference || item.model || '';
+    return {
+        document_id: item.document_id,
+        document_title: item.document_title,
+        page_id: item.page_id,
+        page_number: item.page_number,
+        reference,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        context: {
+            detected_type: item.component_type,
+            model: item.model,
+            description: item.parent_reference
+                ? `${reference} pertenece al módulo ${item.parent_reference}. ${item.description || ''}`.trim()
+                : (item.description || '')
+        }
+    };
+}
+
+function openComponentLocation(item) {
+    const result = componentViewerResult(item);
+    if (!result.document_id || !result.page_number) {
+        showMessage(elements.componentsMessage, 'La ficha no tiene una ubicación exacta indexada.', 'error');
+        return;
+    }
+    // Abrir directamente la página y el bounding box guardados. No volver a
+    // buscar textos ambiguos como M0, PE o FC011.
+    state.search.results = [result];
+    openViewer(result, 0);
+}
+
 function openComponentInSearch(item) {
     document.querySelector('[data-section="searchSection"]')?.click();
     elements.searchInput.value = item.reference || item.model || '';
@@ -1790,8 +1824,9 @@ function renderComponentCatalog(items) {
     elements.componentsList.innerHTML = state.componentCatalog.map((item, index) => `
         <article class="component-catalog-card">
             <div class="component-catalog-type">${escapeHtml(item.component_type || 'Componente')}</div>
-            <h3>${escapeHtml(item.reference || 'Sin referencia')}</h3>
+            <h3>${escapeHtml(item.display_reference || item.reference || 'Sin referencia')}</h3>
             <p class="component-catalog-meta">
+                ${item.parent_reference ? `<span class="component-parent-reference">Módulo físico: ${escapeHtml(item.parent_reference)}</span><br>` : ''}
                 ${item.manufacturer ? `<strong>${escapeHtml(item.manufacturer)}</strong><br>` : ''}
                 ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : '<span class="muted">Modelo pendiente de confirmar</span><br>'}
                 ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}<br>
@@ -1813,25 +1848,26 @@ function formatAssetKind(kind) {
     return ({datasheet:'Datasheet', manual:'Manual', plano:'Plano del componente', foto:'Fotografía', otro:'Otro documento'})[kind] || kind || 'Documento';
 }
 
-function componentSheetMarkup(payload) {
+function componentSheetMarkup(payload, sourceItem = {}) {
     const c = payload.component || {};
     const assets = payload.assets || [];
     return `
         <div class="relations-dialog-header">
-            <div><small>Biblioteca técnica</small><h2>${escapeHtml(c.reference || 'Componente')}</h2></div>
+            <div><small>Biblioteca técnica</small><h2>${escapeHtml(sourceItem.channel_reference || sourceItem.display_reference || c.reference || 'Componente')}</h2></div>
             <button type="button" class="icon-button" data-close-component-sheet>✕</button>
         </div>
         <div class="component-sheet-grid">
             <section class="component-sheet-main">
                 <dl class="component-sheet-data">
-                    <div><dt>Tipo</dt><dd>${escapeHtml(c.type || 'Sin clasificar')}</dd></div>
+                    ${sourceItem.channel_reference ? `<div><dt>Canal PLC</dt><dd>${escapeHtml(sourceItem.channel_reference)}</dd></div><div><dt>Módulo físico</dt><dd>${escapeHtml(sourceItem.parent_reference || c.reference || 'No identificado')}</dd></div>` : ''}
+                    <div><dt>Tipo</dt><dd>${escapeHtml(sourceItem.channel_reference ? 'canal PLC' : (c.type || 'Sin clasificar'))}</dd></div>
                     <div><dt>Fabricante</dt><dd>${escapeHtml(c.manufacturer || 'No identificado')}</dd></div>
                     <div><dt>Modelo</dt><dd>${escapeHtml(c.model || 'No identificado')}</dd></div>
                     <div><dt>Ubicación</dt><dd>${escapeHtml([c.organization,c.plant,c.sector].filter(Boolean).join(' · ') || 'Sin ubicación')}</dd></div>
                     <div><dt>Plano</dt><dd>${escapeHtml(c.document_title || '')}${c.page_number ? ` · página ${c.page_number}` : ''}</dd></div>
                 </dl>
                 <div class="component-description"><h3>Descripción técnica</h3><p>${escapeHtml(c.description || 'Todavía no hay una descripción técnica consolidada para este componente.')}</p></div>
-                ${c.document_id && c.page_number ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación en plano</button>` : ''}
+                ${(sourceItem.document_id || c.document_id) && (sourceItem.page_number || c.page_number) ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación exacta en plano</button>` : ''}
             </section>
             <aside class="component-sheet-docs">
                 ${payload.occurrence_summary?.page_count ? `<section class="component-occurrence-summary"><h3>Ubicaciones en planos</h3><div class="component-sheet-data compact"><div><dt>Página principal</dt><dd>${escapeHtml(String(c.page_number || '-'))}</dd></div><div><dt>Otras páginas</dt><dd>${escapeHtml((payload.occurrence_summary.pages || []).filter(p => Number(p) !== Number(c.page_number)).slice(0,12).join(', ') || 'Ninguna')}</dd></div><div><dt>Páginas únicas</dt><dd>${escapeHtml(String(payload.occurrence_summary.page_count || 0))}</dd></div><div><dt>Menciones detectadas</dt><dd>${escapeHtml(String(payload.occurrence_summary.total_mentions || 0))}</dd></div></div></section>` : ''}
@@ -1864,9 +1900,9 @@ async function openComponentSheet(item) {
 
     const load = async () => {
         const payload = await apiRequest(API.componentLibrary(item.id));
-        dialog.querySelector('.relations-dialog-body').innerHTML = componentSheetMarkup(payload);
+        dialog.querySelector('.relations-dialog-body').innerHTML = componentSheetMarkup(payload, item);
         dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => dialog.close());
-        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentInSearch(item); });
+        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentLocation(item); });
         dialog.querySelectorAll('[data-delete-asset]').forEach(button => button.addEventListener('click', async () => {
             if (!confirm('¿Eliminar este archivo asociado?')) return;
             await apiRequest(`/component-library/assets/${button.dataset.deleteAsset}`, {method:'DELETE'});

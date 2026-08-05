@@ -65,6 +65,57 @@ def is_nonphysical_reference(reference: str | None) -> bool:
         return True
     return any(pattern.fullmatch(compact) for pattern in NON_COMPONENT_PATTERNS)
 
+
+
+PLC_CHANNEL_RE = re.compile(
+    r"^(?:[IQM](?:[WDB])?\d+(?:\.\d+)?|[AQ](?:[WDB])?\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+
+def is_plc_channel(value: str | None) -> bool:
+    return bool(PLC_CHANNEL_RE.fullmatch((value or "").strip()))
+
+def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: str) -> bool:
+    """Convierte una coincidencia del módulo en una ubicación exacta de canal PLC.
+
+    La ficha sigue vinculada al componente físico, pero la referencia visible y el
+    resaltado corresponden a la dirección buscada (por ejemplo Q5050.0).
+    """
+    wanted = normalize_term(query_value)
+    if not wanted or not item.get("page_id"):
+        return False
+    terms = (
+        db.query(models.PageSearchTerm)
+        .filter(models.PageSearchTerm.document_page_id == item["page_id"])
+        .all()
+    )
+    exact = None
+    for term in terms:
+        candidates = (getattr(term, "term", None), getattr(term, "display_text", None))
+        if any(normalize_term(candidate) == wanted for candidate in candidates):
+            exact = term
+            break
+    if exact is None:
+        return False
+
+    parent = item.get("reference") or "módulo"
+    channel = (getattr(exact, "display_text", None) or query_value).strip().upper()
+    item["parent_reference"] = parent
+    item["channel_reference"] = channel
+    item["display_reference"] = channel
+    item["component_type"] = "canal PLC"
+    item["match_rank"] = 0
+    item["match_reason"] = f"Canal exacto del módulo {parent}"
+    item["x"] = exact.x
+    item["y"] = exact.y
+    item["width"] = exact.width
+    item["height"] = exact.height
+    item["description"] = (
+        f"Canal {channel} perteneciente al módulo {parent}. "
+        + (item.get("description") or "")
+    ).strip()
+    return True
+
 MANUFACTURER_DOMAINS = {
     "siemens": "siemens.com",
     "schneider": "se.com",
@@ -279,6 +330,9 @@ def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str,
     return {
         "id": ref.id,
         "reference": reference,
+        "display_reference": reference,
+        "parent_reference": "",
+        "channel_reference": "",
         "component_type": component_type,
         "model": model,
         "manufacturer": manufacturer,
@@ -410,9 +464,21 @@ def list_components(
         item.update(official_component_links(item.get("manufacturer"), item.get("model")))
         consolidated.append(item)
 
+    # Para direcciones PLC (Q5050.0, I123.4, QW5260, etc.) no se muestra
+    # la etiqueta genérica del módulo (M0). Se conserva la ficha del hardware,
+    # pero la tarjeta y la navegación apuntan al canal exacto indexado.
+    if q and is_plc_channel(q):
+        exact_channel_items = []
+        for item in consolidated:
+            candidate = dict(item)
+            if _attach_plc_channel_target(db, candidate, q):
+                exact_channel_items.append(candidate)
+        if exact_channel_items:
+            consolidated = exact_channel_items
+
     consolidated.sort(key=lambda item: (
         item.get("match_rank", 99),
-        normalize_term(item.get("reference")),
+        normalize_term(item.get("display_reference") or item.get("reference")),
         item.get("sector_name") or "",
         item.get("document_title") or "",
     ))

@@ -124,3 +124,10 @@ Archivos principales modificados:
 - Prioriza modelos industriales completos (3RV, 3RT, 6ES7, ATV, etc.).
 - Muestra cantidad de apariciones y páginas en cada ficha.
 - La ficha reúne las apariciones secundarias sin crear tarjetas duplicadas.
+
+## v0.11.3 — Canales PLC y ubicación exacta
+
+- Las consultas de direcciones PLC como `Q5050.0`, `I5050.1` o `QW5260` se muestran con la dirección buscada, no como el nombre genérico del módulo (`M0`).
+- La ficha indica el canal y el módulo físico Siemens al que pertenece.
+- **Ver ubicación exacta en plano** abre directamente la página y el recuadro registrados durante la indexación; no ejecuta una nueva búsqueda textual ambigua.
+- La misma navegación directa se utiliza para componentes con etiquetas repetidas.
