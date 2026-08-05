@@ -133,7 +133,7 @@ def parse_s3_path(value: str | Path) -> tuple[str, str]:
     return bucket, key
 
 
-def upload_file(local_path: str | Path, object_key: str) -> str:
+def upload_file(local_path: str | Path, object_key: str, content_type: str = "application/pdf") -> str:
     local_path = Path(local_path)
     if not local_path.exists() or local_path.stat().st_size <= 0:
         raise RuntimeError("El archivo temporal no existe o está vacío")
@@ -150,7 +150,7 @@ def upload_file(local_path: str | Path, object_key: str) -> str:
         str(local_path),
         bucket,
         object_key,
-        ExtraArgs={"ContentType": "application/pdf"},
+        ExtraArgs={"ContentType": content_type or "application/octet-stream"},
     )
 
     # Verifica que Railway haya recibido realmente el objeto antes de guardar en DB.

@@ -23,6 +23,8 @@ const API = {
     componentRelations: "/component-relations",
     assistantAsk: "/assistant/ask",
     componentCatalogExport: "/component-catalog/export.xlsx",
+    componentLibrary: (id) => `/component-library/${id}`,
+    componentLibraryUpload: (id) => `/component-library/${id}/assets`,
     documentProgress: (id) => `/documents/${id}/progress`,
 };
 
@@ -1781,34 +1783,110 @@ function openComponentInSearch(item) {
 function renderComponentCatalog(items) {
     state.componentCatalog = items || [];
     if (!elements.componentsList) return;
-    if (!items?.length) {
-        elements.componentsList.innerHTML = '<div class="empty-state"><strong>No se encontraron componentes.</strong><p>Procesá un plano o cambiá los filtros.</p></div>';
+    if (!state.componentCatalog.length) {
+        elements.componentsList.innerHTML = `<div class="empty-state"><strong>No se encontraron componentes.</strong><p>Ajustá los filtros o reindexá el PDF para reconstruir el catálogo.</p></div>`;
         return;
     }
-    elements.componentsList.innerHTML = items.map((item,index) => `
+    elements.componentsList.innerHTML = state.componentCatalog.map((item, index) => `
         <article class="component-catalog-card">
-            <div class="component-catalog-type">${escapeHtml(item.component_type || 'otro')}</div>
-            ${item.match_reason ? `<div class="component-match-reason">${escapeHtml(item.match_reason)}</div>` : ''}
-            <h3>${escapeHtml(item.reference || item.model || 'Sin referencia')}</h3>
-            <div class="component-catalog-meta">
-                ${item.manufacturer ? `<strong>Fabricante:</strong> ${escapeHtml(item.manufacturer)}<br>` : ''}
-                ${item.model ? `<strong>Modelo:</strong> ${escapeHtml(item.model)}<br>` : ''}
-                ${escapeHtml(item.organization_name)} · ${escapeHtml(item.plant_name)} · ${escapeHtml(item.sector_name)}<br>
-                ${escapeHtml(item.document_title)} · página ${item.page_number}
-            </div>
+            <div class="component-catalog-type">${escapeHtml(item.component_type || 'Componente')}</div>
+            <h3>${escapeHtml(item.reference || 'Sin referencia')}</h3>
+            <p class="component-catalog-meta">
+                ${item.manufacturer ? `<strong>${escapeHtml(item.manufacturer)}</strong><br>` : ''}
+                ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : ''}
+                ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}
+            </p>
             <div class="component-catalog-actions">
-                <button type="button" class="primary-button" data-open-component="${index}">Ver en plano</button>
-                <button type="button" class="secondary-button" data-relations-component="${index}">Ver relaciones</button>
-                <button type="button" class="secondary-button" data-graph-component="${index}">Seguir circuito</button>
-                ${item.manual_url ? `<a class="secondary-button component-link-button" href="${escapeHtml(item.manual_url)}" target="_blank" rel="noopener noreferrer">Manual oficial</a>` : ''}
-                ${item.product_url ? `<a class="secondary-button component-link-button" href="${escapeHtml(item.product_url)}" target="_blank" rel="noopener noreferrer">Página oficial</a>` : ''}
+                <button type="button" class="primary-button" data-open-component-sheet="${index}">Abrir ficha</button>
             </div>
-        </article>`).join('');
-    elements.componentsList.querySelectorAll('[data-open-component]').forEach(btn => btn.addEventListener('click', () => openComponentInSearch(state.componentCatalog[Number(btn.dataset.openComponent)])));
-    elements.componentsList.querySelectorAll('[data-relations-component]').forEach(btn => btn.addEventListener('click', () => showComponentRelations(state.componentCatalog[Number(btn.dataset.relationsComponent)])));
-    elements.componentsList.querySelectorAll('[data-graph-component]').forEach(btn => btn.addEventListener('click', () => showComponentGraph(state.componentCatalog[Number(btn.dataset.graphComponent)])));
+        </article>
+    `).join('');
+    elements.componentsList.querySelectorAll('[data-open-component-sheet]').forEach(btn => btn.addEventListener('click', () => openComponentSheet(state.componentCatalog[Number(btn.dataset.openComponentSheet)])));
 }
 
+function formatAssetKind(kind) {
+    return ({datasheet:'Datasheet', manual:'Manual', plano:'Plano del componente', foto:'Fotografía', otro:'Otro documento'})[kind] || kind || 'Documento';
+}
+
+function componentSheetMarkup(payload) {
+    const c = payload.component || {};
+    const assets = payload.assets || [];
+    return `
+        <div class="relations-dialog-header">
+            <div><small>Biblioteca técnica</small><h2>${escapeHtml(c.reference || 'Componente')}</h2></div>
+            <button type="button" class="icon-button" data-close-component-sheet>✕</button>
+        </div>
+        <div class="component-sheet-grid">
+            <section class="component-sheet-main">
+                <dl class="component-sheet-data">
+                    <div><dt>Tipo</dt><dd>${escapeHtml(c.type || 'Sin clasificar')}</dd></div>
+                    <div><dt>Fabricante</dt><dd>${escapeHtml(c.manufacturer || 'No identificado')}</dd></div>
+                    <div><dt>Modelo</dt><dd>${escapeHtml(c.model || 'No identificado')}</dd></div>
+                    <div><dt>Ubicación</dt><dd>${escapeHtml([c.organization,c.plant,c.sector].filter(Boolean).join(' · ') || 'Sin ubicación')}</dd></div>
+                    <div><dt>Plano</dt><dd>${escapeHtml(c.document_title || '')}${c.page_number ? ` · página ${c.page_number}` : ''}</dd></div>
+                </dl>
+                <div class="component-description"><h3>Descripción técnica</h3><p>${escapeHtml(c.description || 'Todavía no hay una descripción técnica consolidada para este componente.')}</p></div>
+                ${c.document_id && c.page_number ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación en plano</button>` : ''}
+            </section>
+            <aside class="component-sheet-docs">
+                <h3>Documentación asociada</h3>
+                <div class="component-assets-list">
+                    ${assets.length ? assets.map(a => `<article class="component-asset"><div><strong>${escapeHtml(formatAssetKind(a.kind))}</strong><span>${escapeHtml(a.title || a.filename)}</span></div><div class="component-asset-actions"><a class="secondary-button" target="_blank" rel="noopener" href="${escapeHtml(a.download_url)}">Abrir</a><button type="button" class="icon-button" data-delete-asset="${a.id}" title="Eliminar">🗑</button></div></article>`).join('') : '<p class="muted-text">Todavía no se cargaron datasheets, manuales o planos propios.</p>'}
+                </div>
+                <form class="component-asset-form" data-component-asset-form>
+                    <label>Tipo de archivo<select name="asset_kind"><option value="datasheet">Datasheet</option><option value="manual">Manual</option><option value="plano">Plano del componente</option><option value="foto">Fotografía</option><option value="otro">Otro documento</option></select></label>
+                    <label>Título<input name="title" type="text" placeholder="Ej.: Manual Siemens 3RV2"></label>
+                    <label>Archivo<input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" required></label>
+                    <button class="primary-button" type="submit">Subir documentación</button>
+                    <div class="message hidden" data-component-upload-message></div>
+                </form>
+            </aside>
+        </div>`;
+}
+
+async function openComponentSheet(item) {
+    if (!item?.id) return;
+    document.getElementById('componentSheetDialog')?.remove();
+    const dialog = document.createElement('dialog');
+    dialog.id = 'componentSheetDialog';
+    dialog.className = 'relations-dialog component-sheet-dialog';
+    dialog.innerHTML = `<div class="relations-dialog-body"><div class="loading-state">Cargando ficha técnica…</div></div>`;
+    document.body.appendChild(dialog);
+    dialog.addEventListener('close', () => dialog.remove());
+    dialog.showModal();
+
+    const load = async () => {
+        const payload = await apiRequest(API.componentLibrary(item.id));
+        dialog.querySelector('.relations-dialog-body').innerHTML = componentSheetMarkup(payload);
+        dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => dialog.close());
+        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentInSearch(item); });
+        dialog.querySelectorAll('[data-delete-asset]').forEach(button => button.addEventListener('click', async () => {
+            if (!confirm('¿Eliminar este archivo asociado?')) return;
+            await apiRequest(`/component-library/assets/${button.dataset.deleteAsset}`, {method:'DELETE'});
+            await load();
+        }));
+        const form = dialog.querySelector('[data-component-asset-form]');
+        form?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const message = form.querySelector('[data-component-upload-message]');
+            const submit = form.querySelector('button[type="submit"]');
+            submit.disabled = true; submit.textContent = 'Subiendo...';
+            message.classList.add('hidden');
+            try {
+                const response = await fetch(API.componentLibraryUpload(item.id), {method:'POST', body:new FormData(form)});
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || 'No se pudo subir el archivo');
+                await load();
+            } catch (error) {
+                showMessage(message, error.message, 'error');
+            } finally {
+                submit.disabled = false; submit.textContent = 'Subir documentación';
+            }
+        });
+    };
+    try { await load(); }
+    catch (error) { dialog.querySelector('.relations-dialog-body').innerHTML = `<div class="relations-dialog-header"><h2>No se pudo abrir la ficha</h2><button class="icon-button" data-close-component-sheet>✕</button></div><p>${escapeHtml(error.message)}</p>`; dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => dialog.close()); }
+}
 
 async function showComponentGraph(item) {
     if (!item?.id) return;

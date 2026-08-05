@@ -108,3 +108,11 @@ Archivos principales modificados:
 - Envía al backend la página, documento y referencia actuales como contexto explícito.
 - La fuente correspondiente queda marcada internamente como contexto actual y recibe máxima prioridad.
 - Si no hay una página abierta o vista recientemente, conserva el comportamiento de búsqueda general.
+
+## v0.11.0 — Biblioteca técnica de componentes
+
+- La sección Componentes ahora se orienta al catálogo técnico y muestra una sola acción: **Abrir ficha**.
+- Cada ficha consolida tipo, fabricante, modelo, ubicación, descripción y página principal.
+- Permite asociar y abrir datasheets, manuales, planos del componente, fotografías y otros documentos.
+- Los archivos se guardan en el Bucket de Railway cuando está configurado, o localmente en desarrollo.
+- La navegación avanzada por planos continúa disponible en la sección Buscar.

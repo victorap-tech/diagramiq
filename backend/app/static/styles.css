@@ -1278,3 +1278,26 @@ textarea {
     justify-content: center;
     text-decoration: none;
 }
+
+/* v0.11.0 · Biblioteca técnica de componentes */
+.component-catalog-actions .primary-button { width:100%; }
+.component-sheet-dialog { width:min(1040px,96vw); }
+.component-sheet-grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr); gap:22px; }
+.component-sheet-main,.component-sheet-docs { min-width:0; }
+.component-sheet-data { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:0 0 18px; }
+.component-sheet-data div { border:1px solid #dbe5ef; border-radius:12px; padding:11px; background:#f8fbfd; }
+.component-sheet-data dt { font-size:.75rem; text-transform:uppercase; font-weight:800; color:#587188; }
+.component-sheet-data dd { margin:4px 0 0; color:#173c61; font-weight:700; overflow-wrap:anywhere; }
+.component-description { border-top:1px solid #e5e7eb; padding-top:14px; margin-bottom:16px; }
+.component-description h3,.component-sheet-docs h3 { margin:0 0 10px; }
+.component-description p { white-space:pre-wrap; line-height:1.55; }
+.component-assets-list { display:grid; gap:9px; margin-bottom:16px; }
+.component-asset { display:flex; justify-content:space-between; align-items:center; gap:12px; border:1px solid #dbe5ef; border-radius:12px; padding:10px; background:#fff; }
+.component-asset div:first-child { display:flex; flex-direction:column; min-width:0; }
+.component-asset span { color:#607080; font-size:.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:310px; }
+.component-asset-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
+.component-asset-form { display:grid; gap:10px; border-top:1px solid #e5e7eb; padding-top:15px; }
+.component-asset-form label { display:grid; gap:5px; font-weight:700; color:#315f8d; }
+.component-asset-form input,.component-asset-form select { width:100%; }
+.muted-text { color:#607080; }
+@media (max-width:760px) { .component-sheet-grid { grid-template-columns:1fr; } .component-sheet-data { grid-template-columns:1fr; } }

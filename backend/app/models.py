@@ -301,3 +301,22 @@ class ComponentConnection(Base):
     reason = Column(Text, nullable=True)
     cross_page = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ComponentAsset(Base):
+    """Documento técnico asociado a una aparición de componente del catálogo."""
+    __tablename__ = "component_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    component_reference_id = Column(
+        Integer, ForeignKey("component_references.id"), nullable=False, index=True
+    )
+    asset_kind = Column(String(40), nullable=False, default="datasheet")
+    title = Column(String(200), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(600), nullable=False)
+    content_type = Column(String(120), nullable=True)
+    file_size = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    component_reference = relationship("ComponentReference")
