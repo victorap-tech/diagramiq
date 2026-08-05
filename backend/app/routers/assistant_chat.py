@@ -23,6 +23,9 @@ class AssistantQuestion(BaseModel):
     sector_id: Optional[int] = None
     continue_response: bool = False
     previous_answer: Optional[str] = Field(default=None, max_length=16000)
+    context_page_id: Optional[int] = None
+    context_document_id: Optional[int] = None
+    context_reference: Optional[str] = Field(default=None, max_length=200)
 
 
 def _keywords(question: str) -> list[str]:
@@ -63,6 +66,64 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
     references = list(dict.fromkeys(ref for ref in references if ref))[:6]
     snippets: list[dict] = []
     seen_pages: set[int] = set()
+
+    # Si el técnico abrió una página del plano, esa página es el contexto principal.
+    # Se incorpora primero para evitar elegir otra instancia de la misma referencia
+    # que pertenezca a otro sector o subsistema.
+    if payload.context_page_id is not None:
+        current_query = _base_page_query(
+            db, payload.organization_id, payload.plant_id, payload.sector_id
+        ).filter(models.DocumentPage.id == payload.context_page_id)
+        current_row = current_query.first()
+        if current_row:
+            page, doc, sector, plant, org = current_row
+            current_ref = None
+            ref_candidates = db.query(models.ComponentReference).filter(
+                models.ComponentReference.document_page_id == page.id
+            ).all()
+            requested = set(references)
+            context_ref = normalize_reference(payload.context_reference or "")
+            if context_ref:
+                requested.add(context_ref)
+            for candidate in ref_candidates:
+                candidate_norm = normalize_reference(
+                    candidate.normalized_reference or candidate.reference or ""
+                )
+                if requested and candidate_norm in requested:
+                    current_ref = candidate
+                    break
+            if current_ref is None and ref_candidates:
+                current_ref = max(
+                    ref_candidates,
+                    key=lambda item: (
+                        int(item.catalog_confidence or 0),
+                        1 if (item.model or item.manufacturer or item.detected_type) else 0,
+                    ),
+                )
+            seen_pages.add(page.id)
+            snippets.append({
+                "reference": current_ref.reference if current_ref else (payload.context_reference or ""),
+                "type": (current_ref.detected_type or current_ref.component_type or "") if current_ref else "",
+                "model": (current_ref.model or "") if current_ref else "",
+                "manufacturer": (current_ref.manufacturer or "") if current_ref else "",
+                "description": (current_ref.description or current_ref.row_text or "") if current_ref else "",
+                "confidence": int(current_ref.catalog_confidence or 0) if current_ref else 0,
+                "source_kind": (current_ref.source_kind if current_ref else None) or page.page_type or "plan",
+                "page_number": page.page_number,
+                "page_id": page.id,
+                "document_id": doc.id,
+                "document_title": doc.title,
+                "organization": org.name,
+                "plant": plant.name,
+                "sector": sector.name,
+                "image_url": f"/documents/pages/{page.id}/image",
+                "x": current_ref.x if current_ref else None,
+                "y": current_ref.y if current_ref else None,
+                "width": current_ref.width if current_ref else None,
+                "height": current_ref.height if current_ref else None,
+                "text": (page.text_content or "")[:4200],
+                "is_current_context": True,
+            })
 
     if references:
         ref_query = (
@@ -110,6 +171,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "width": ref.width,
                 "height": ref.height,
                 "text": (page.text_content or "")[:2800],
+                "is_current_context": False,
             })
 
     terms = _keywords(payload.question)
@@ -142,6 +204,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "width": None,
                 "height": None,
                 "text": (page.text_content or "")[:2800],
+                "is_current_context": False,
             })
             if len(snippets) >= 8:
                 break
@@ -165,8 +228,9 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
     context_blocks: list[str] = []
     sources: list[dict] = []
     for index, item in enumerate(snippets, start=1):
+        context_mark = " | CONTEXTO ACTUAL ABIERTO POR EL USUARIO" if item.get("is_current_context") else ""
         header = (
-            f"FUENTE {index} | Empresa: {item['organization']} | Planta: {item['plant']} | "
+            f"FUENTE {index}{context_mark} | Empresa: {item['organization']} | Planta: {item['plant']} | "
             f"Sector: {item['sector']} | Documento: {item['document_title']} | Página: {item['page_number']}"
         )
         details = " | ".join(
@@ -194,6 +258,7 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             "width": item["width"],
             "height": item["height"],
             "source_kind": item["source_kind"],
+            "is_current_context": bool(item.get("is_current_context")),
         })
 
     continuation_instruction = ""
@@ -212,6 +277,7 @@ No inventes conexiones, protecciones, parámetros ni causas que no estén respal
 Cuando algo no pueda confirmarse, decilo expresamente.
 Citá las fuentes dentro de la respuesta como [Fuente 1], [Fuente 2], etc.
 Priorizá el componente principal sobre listados o menciones secundarias.
+Si una fuente está marcada como CONTEXTO ACTUAL ABIERTO POR EL USUARIO, respondé sobre esa instancia concreta y no sobre otra referencia homónima de otro sector.
 Organizá la respuesta con este orden: resumen técnico, función, conexión/relaciones, advertencias y fuentes.
 Sé completo pero evitá repeticiones. Cerrá todas las frases y no termines una sección a mitad.
 No des por segura una condición eléctrica real: indicá siempre que debe verificarse en campo y aplicarse el procedimiento de seguridad de la planta.
@@ -236,6 +302,7 @@ CONTEXTO INDEXADO:
     ]
     component_candidates.sort(
         key=lambda item: (
+            1 if item.get("is_current_context") else 0,
             1 if item.get("source_kind") == "plan" else 0,
             int(item.get("confidence") or 0),
             1 if item.get("model") else 0,
@@ -286,4 +353,6 @@ CONTEXTO INDEXADO:
         "context_count": len(sources),
         "incomplete": bool(response.truncated),
         "continued": bool(payload.continue_response),
+        "context_applied": any(item.get("is_current_context") for item in snippets),
+        "context_page_id": payload.context_page_id,
     }

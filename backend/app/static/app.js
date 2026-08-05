@@ -158,6 +158,7 @@ const state = {
         resultIndex: -1,
         coordinates: null,
         scale: 1,
+        lastResult: null,
     },
 };
 
@@ -1584,6 +1585,19 @@ async function continueAiAnswer() {
     }
 }
 
+function currentAssistantContext() {
+    const result = state.viewer.result || state.viewer.lastResult || null;
+    if (!result) return {};
+    const pageId = Number(result.page_id || result.document_page_id || 0) || null;
+    const documentId = Number(result.document_id || 0) || null;
+    const reference = String(getResultReference(result) || result.reference || "").trim();
+    return {
+        context_page_id: pageId,
+        context_document_id: documentId,
+        context_reference: reference || null,
+    };
+}
+
 async function handleAiQuestion(event) {
     event.preventDefault();
     const question = String(elements.aiQuestionInput?.value || "").trim();
@@ -1611,6 +1625,7 @@ async function handleAiQuestion(event) {
             organization_id: selectedNumericValue(elements.searchOrganization),
             plant_id: selectedNumericValue(elements.searchPlant),
             sector_id: sectorId,
+            ...currentAssistantContext(),
         };
         const response = await apiRequest(API.assistantAsk, {
             method: "POST",
@@ -1619,7 +1634,9 @@ async function handleAiQuestion(event) {
         lastAiResponse = response;
         renderAiAnswer(response);
         if (elements.aiQuestionStatus) {
-            elements.aiQuestionStatus.textContent = `Respuesta basada en ${response?.context_count || 0} fuente(s) indexada(s).`;
+            elements.aiQuestionStatus.textContent = response?.context_applied
+                ? `Respuesta basada en la página abierta y ${response?.context_count || 0} fuente(s) indexada(s).`
+                : `Respuesta basada en ${response?.context_count || 0} fuente(s) indexada(s).`;
             elements.aiQuestionStatus.className = "vision-status success";
         }
     } catch (error) {
@@ -2092,6 +2109,7 @@ function openViewer(result, resultIndex = null) {
     resetViewerZoom();
 
     state.viewer.result = result;
+    state.viewer.lastResult = result;
     state.viewer.resultIndex = resultIndex !== null
         ? resultIndex
         : state.search.results.indexOf(result);
