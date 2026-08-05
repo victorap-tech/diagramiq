@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.10.5"
+        href="/static/styles.css?v=0.10.6"
     >
 </head>
 
@@ -181,7 +181,7 @@
                     <h2>Componentes detectados</h2>
                     <p>Filtrá interruptores, contactores, variadores, PLC, módulos, motores y otros elementos encontrados en los planos.</p>
                 </div>
-                <button id="refreshComponentsButton" class="secondary-button" type="button">Actualizar</button>
+                <div class="section-actions"><button id="exportComponentsButton" class="primary-button" type="button">Exportar a Excel</button><button id="refreshComponentsButton" class="secondary-button" type="button">Actualizar</button></div>
             </div>
             <div class="card component-filter-card">
                 <div class="form-grid component-filter-grid">
@@ -352,6 +352,8 @@
                     <textarea id="aiQuestionInput" rows="3" maxlength="1500" placeholder="Ejemplo: ¿Qué protege FC041 y en qué página aparece?" required></textarea>
                     <div class="ai-question-actions">
                         <button id="aiQuestionButton" class="primary-button" type="submit">🤖 Preguntar</button>
+                        <button id="aiClearButton" class="secondary-button" type="button">Limpiar</button>
+                        <button id="aiCopyButton" class="secondary-button" type="button">Copiar respuesta</button>
                         <small>La respuesta se basa en el contenido ya indexado.</small>
                     </div>
                 </form>
@@ -744,7 +746,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.10.5</span>
+        <span>DiagramIQ v0.10.6</span>
 
         <a
             href="/docs"
@@ -755,6 +757,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.10.5"></script>
+    <script src="/static/app.js?v=0.10.6"></script>
 </body>
 </html>

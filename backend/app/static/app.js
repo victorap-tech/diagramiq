@@ -22,6 +22,7 @@ const API = {
     componentCatalog: "/component-catalog",
     componentRelations: "/component-relations",
     assistantAsk: "/assistant/ask",
+    componentCatalogExport: "/component-catalog/export.xlsx",
     documentProgress: (id) => `/documents/${id}/progress`,
 };
 
@@ -73,6 +74,8 @@ const elements = {
     aiQuestionStatus: document.getElementById("aiQuestionStatus"),
     aiAnswer: document.getElementById("aiAnswer"),
     aiProviderBadge: document.getElementById("aiProviderBadge"),
+    aiClearButton: document.getElementById("aiClearButton"),
+    aiCopyButton: document.getElementById("aiCopyButton"),
 
     componentOrganization: document.getElementById("componentOrganization"),
     componentPlant: document.getElementById("componentPlant"),
@@ -84,6 +87,7 @@ const elements = {
     componentsLoading: document.getElementById("componentsLoading"),
     componentsList: document.getElementById("componentsList"),
     refreshComponentsButton: document.getElementById("refreshComponentsButton"),
+    exportComponentsButton: document.getElementById("exportComponentsButton"),
 
     uploadOrganization: document.getElementById("uploadOrganization"),
     uploadPlant: document.getElementById("uploadPlant"),
@@ -446,6 +450,7 @@ async function loadOrganizations() {
         resetSelect(elements.searchSector, "Seleccionar sector");
         resetSelect(elements.uploadPlant, "Seleccionar planta");
         resetSelect(elements.uploadSector, "Seleccionar sector");
+        syncComponentOrganizations();
     } catch (error) {
         console.error("Error cargando organizaciones:", error);
 
@@ -1627,6 +1632,48 @@ async function handleAiQuestion(event) {
     }
 }
 
+function clearAiConsultation() {
+    if (elements.aiQuestionInput) {
+        elements.aiQuestionInput.value = "";
+        elements.aiQuestionInput.focus();
+    }
+    if (elements.aiQuestionStatus) {
+        elements.aiQuestionStatus.textContent = "";
+        elements.aiQuestionStatus.className = "vision-status";
+    }
+    if (elements.aiAnswer) {
+        elements.aiAnswer.innerHTML = "";
+        elements.aiAnswer.classList.add("hidden");
+    }
+    lastAiRequest = null;
+    lastAiResponse = null;
+}
+
+async function copyAiResponse() {
+    const text = String(elements.aiAnswer?.innerText || "").trim();
+    if (!text) {
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = "Todavía no hay una respuesta para copiar.";
+            elements.aiQuestionStatus.className = "vision-status error";
+        }
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = "Respuesta copiada.";
+            elements.aiQuestionStatus.className = "vision-status success";
+        }
+    } catch (_) {
+        const area = document.createElement("textarea");
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+    }
+}
+
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
@@ -1636,6 +1683,8 @@ function initializeSearchEvents() {
     elements.visionCircuitButton?.addEventListener("click", followLastVisionCircuit);
     elements.visionRetryButton?.addEventListener("click", retryVisionPhoto);
     elements.aiQuestionForm?.addEventListener("submit", handleAiQuestion);
+    elements.aiClearButton?.addEventListener("click", clearAiConsultation);
+    elements.aiCopyButton?.addEventListener("click", copyAiResponse);
 }
 
 
@@ -1720,6 +1769,7 @@ function renderComponentCatalog(items) {
     elements.componentsList.innerHTML = items.map((item,index) => `
         <article class="component-catalog-card">
             <div class="component-catalog-type">${escapeHtml(item.component_type || 'otro')}</div>
+            ${item.match_reason ? `<div class="component-match-reason">${escapeHtml(item.match_reason)}</div>` : ''}
             <h3>${escapeHtml(item.reference || item.model || 'Sin referencia')}</h3>
             <div class="component-catalog-meta">
                 ${item.model ? `<strong>Modelo:</strong> ${escapeHtml(item.model)}<br>` : ''}
@@ -1812,12 +1862,7 @@ async function loadComponentCatalog() {
     if (!elements.componentsList) return;
     elements.componentsLoading?.classList.remove('hidden');
     elements.componentsMessage?.classList.add('hidden');
-    const params = new URLSearchParams();
-    if (elements.componentOrganization?.value) params.set('organization_id', elements.componentOrganization.value);
-    if (elements.componentPlant?.value) params.set('plant_id', elements.componentPlant.value);
-    if (elements.componentSector?.value) params.set('sector_id', elements.componentSector.value);
-    if (elements.componentType?.value) params.set('component_type', elements.componentType.value);
-    if (elements.componentQuery?.value.trim()) params.set('q', elements.componentQuery.value.trim());
+    const params = componentCatalogParams();
     try {
         const response = await apiRequest(`${API.componentCatalog}?${params.toString()}`);
         renderComponentSummary(response.counts);
@@ -1830,6 +1875,32 @@ async function loadComponentCatalog() {
     }
 }
 
+function componentCatalogParams() {
+    const params = componentCatalogParams();
+    return params;
+}
+
+function exportComponentCatalog() {
+    const button = elements.exportComponentsButton;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Preparando Excel...";
+    }
+    const url = `${API.componentCatalogExport}?${componentCatalogParams().toString()}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'diagramiq-componentes.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => {
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Exportar a Excel";
+        }
+    }, 1200);
+}
+
 function initializeComponentCatalogEvents() {
     populateComponentTypeOptions();
     syncComponentOrganizations();
@@ -1838,6 +1909,7 @@ function initializeComponentCatalogEvents() {
     elements.componentSector?.addEventListener('change', loadComponentCatalog);
     elements.componentType?.addEventListener('change', loadComponentCatalog);
     elements.refreshComponentsButton?.addEventListener('click', loadComponentCatalog);
+    elements.exportComponentsButton?.addEventListener('click', exportComponentCatalog);
     let timer;
     elements.componentQuery?.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(loadComponentCatalog, 350); });
 }
@@ -2358,6 +2430,7 @@ async function handleUploadSubmit(event) {
 
         resetSelect(elements.uploadPlant, "Seleccionar planta");
         resetSelect(elements.uploadSector, "Seleccionar sector");
+        syncComponentOrganizations();
 
         await loadOrganizations();
     } catch (error) {

@@ -71,3 +71,25 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 - Fuentes clicables que abren la página correspondiente y resaltan la referencia.
 - Acciones rápidas: Ver en plano y Ver relacionados.
 - Mantiene Anthropic/OpenAI, catálogo desde listas e indexación de la v0.10.3.
+
+## v0.10.6 - Catálogo y uso diario
+
+Cambios implementados sobre v0.10.5:
+
+- El filtro Empresa del catálogo se sincroniza después de cargar las empresas.
+- Búsqueda normalizada y ordenada por relevancia: referencia exacta, modelo exacto, coincidencia parcial y descripción.
+- Las consultas `fc011`, `FC011` y `-FC011` se tratan como la misma referencia.
+- Los resultados secundarios mencionados solo en descripciones se excluyen cuando existen coincidencias reales en referencia o modelo.
+- Cada tarjeta indica por qué apareció en los resultados.
+- Botones Limpiar y Copiar respuesta en el asistente contextual.
+- Exportación del catálogo filtrado a Excel, con una fila por componente/página/sector y sin duplicados visuales.
+- Versión de API y frontend actualizada a 0.10.6.
+
+Archivos principales modificados:
+
+- `backend/app/routers/component_catalog.py`
+- `backend/app/static/app.js`
+- `backend/app/static/index.html`
+- `backend/app/static/styles.css`
+- `backend/app/main.py`
+- `backend/requirements.txt`
