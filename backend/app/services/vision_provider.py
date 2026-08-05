@@ -20,6 +20,7 @@ class VisionResponse:
     text: str
     provider: str
     model: str
+    truncated: bool = False
 
 
 def _selected_provider() -> str:
@@ -193,7 +194,8 @@ def _call_openai_text(prompt: str, max_tokens: int) -> VisionResponse:
     text = _extract_openai_text(payload)
     if not text:
         raise HTTPException(502, "OpenAI respondió sin texto utilizable.")
-    return VisionResponse(text=text, provider="openai", model=model)
+    truncated = payload.get("status") == "incomplete" or bool(payload.get("incomplete_details"))
+    return VisionResponse(text=text, provider="openai", model=model, truncated=truncated)
 
 
 def _call_anthropic_text(prompt: str, max_tokens: int) -> VisionResponse:
@@ -226,10 +228,17 @@ def _call_anthropic_text(prompt: str, max_tokens: int) -> VisionResponse:
     text = _extract_anthropic_text(payload)
     if not text:
         raise HTTPException(502, "Anthropic respondió sin texto utilizable.")
-    return VisionResponse(text=text, provider="anthropic", model=model)
+    truncated = payload.get("stop_reason") == "max_tokens"
+    return VisionResponse(text=text, provider="anthropic", model=model, truncated=truncated)
 
 
-def ask_text(prompt: str, max_tokens: int = 900) -> VisionResponse:
+def ask_text(prompt: str, max_tokens: int | None = None) -> VisionResponse:
+    if max_tokens is None:
+        try:
+            max_tokens = int(os.getenv("AI_TEXT_MAX_TOKENS", "1800"))
+        except ValueError:
+            max_tokens = 1800
+        max_tokens = max(600, min(max_tokens, 4000))
     provider = _selected_provider()
     if provider == "anthropic":
         return _call_anthropic_text(prompt, max_tokens)

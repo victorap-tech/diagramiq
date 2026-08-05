@@ -21,6 +21,8 @@ class AssistantQuestion(BaseModel):
     organization_id: Optional[int] = None
     plant_id: Optional[int] = None
     sector_id: Optional[int] = None
+    continue_response: bool = False
+    previous_answer: Optional[str] = Field(default=None, max_length=16000)
 
 
 def _keywords(question: str) -> list[str]:
@@ -194,12 +196,24 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             "source_kind": item["source_kind"],
         })
 
+    continuation_instruction = ""
+    if payload.continue_response and payload.previous_answer:
+        continuation_instruction = f"""
+
+RESPUESTA ANTERIOR (quedó incompleta):
+{payload.previous_answer}
+
+Continuá exactamente desde donde quedó. No repitas lo ya dicho. Terminá las frases y secciones pendientes.
+"""
+
     prompt = f"""Sos DiagramIQ, un asistente técnico de mantenimiento industrial.
 Respondé en español claro y práctico usando SOLO la información del contexto indexado.
 No inventes conexiones, protecciones, parámetros ni causas que no estén respaldaldadas por el contexto.
 Cuando algo no pueda confirmarse, decilo expresamente.
 Citá las fuentes dentro de la respuesta como [Fuente 1], [Fuente 2], etc.
 Priorizá el componente principal sobre listados o menciones secundarias.
+Organizá la respuesta con este orden: resumen técnico, función, conexión/relaciones, advertencias y fuentes.
+Sé completo pero evitá repeticiones. Cerrá todas las frases y no termines una sección a mitad.
 No des por segura una condición eléctrica real: indicá siempre que debe verificarse en campo y aplicarse el procedimiento de seguridad de la planta.
 
 PREGUNTA DEL USUARIO:
@@ -210,8 +224,9 @@ REFERENCIAS DETECTADAS:
 
 CONTEXTO INDEXADO:
 {chr(10).join(chr(10) + block for block in context_blocks)}
+{continuation_instruction}
 """
-    response = ask_text(prompt, max_tokens=1000)
+    response = ask_text(prompt)
 
     component_candidates = [
         item for item in snippets
@@ -269,4 +284,6 @@ CONTEXTO INDEXADO:
         "component_card": component_card,
         "detected_references": references,
         "context_count": len(sources),
+        "incomplete": bool(response.truncated),
+        "continued": bool(payload.continue_response),
     }

@@ -64,7 +64,7 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 - Las listas ayudan a indexar, pero siguen quedando detrás de los planos en la búsqueda.
 - Muestra la etapa “Leyendo listas de componentes” en la barra de progreso.
 
-## v0.10.4 - Respuesta técnica estructurada
+## v0.10.5 - Respuesta técnica estructurada
 
 - Ficha técnica del componente antes de la explicación de la IA.
 - Indicador de confianza según catálogo/lista y plano.

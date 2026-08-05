@@ -1368,6 +1368,8 @@ async function handleComponentPhoto(event) {
 
 let lastVisionQuery = "";
 let lastVisionResult = null;
+let lastAiResponse = null;
+let lastAiRequest = null;
 
 function visionKindLabel(kind) {
     return ({ cable_tag: "TAG de cable", component: "Componente", document: "Plano o documento", unknown: "Elemento" })[kind] || "Elemento";
@@ -1506,7 +1508,11 @@ function renderAiAnswer(response) {
             </button>`).join("")}</div>`
         : "";
 
-    elements.aiAnswer.innerHTML = `${cardHtml}<div class="ai-answer-heading">Explicación técnica</div><div class="ai-answer-text">${answer}</div>${sourceHtml}`;
+    const continueHtml = response?.incomplete
+        ? `<div class="ai-continuation-box"><span>La respuesta alcanzó el límite de salida.</span><button type="button" class="primary-button" id="aiContinueButton">Continuar análisis</button></div>`
+        : "";
+
+    elements.aiAnswer.innerHTML = `${cardHtml}<div class="ai-answer-heading">Explicación técnica</div><div class="ai-answer-text">${answer}</div>${continueHtml}${sourceHtml}`;
     elements.aiAnswer.classList.remove("hidden");
 
     elements.aiAnswer.querySelectorAll(".ai-open-source").forEach((button) => {
@@ -1524,9 +1530,52 @@ function renderAiAnswer(response) {
             elements.searchForm?.requestSubmit();
         });
     });
+    elements.aiAnswer.querySelector("#aiContinueButton")?.addEventListener("click", continueAiAnswer);
 
     if (elements.aiProviderBadge) {
         elements.aiProviderBadge.textContent = `${response?.provider || "IA"} · ${response?.model || ""}`;
+    }
+}
+
+async function continueAiAnswer() {
+    if (!lastAiResponse || !lastAiRequest) return;
+    const button = elements.aiAnswer?.querySelector("#aiContinueButton");
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Continuando...";
+    }
+    try {
+        const response = await apiRequest(API.assistantAsk, {
+            method: "POST",
+            body: {
+                ...lastAiRequest,
+                continue_response: true,
+                previous_answer: lastAiResponse.answer,
+            },
+        });
+        lastAiResponse = {
+            ...lastAiResponse,
+            answer: `${lastAiResponse.answer}\n\n${response.answer || ""}`.trim(),
+            incomplete: Boolean(response.incomplete),
+            provider: response.provider || lastAiResponse.provider,
+            model: response.model || lastAiResponse.model,
+        };
+        renderAiAnswer(lastAiResponse);
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = lastAiResponse.incomplete
+                ? "La respuesta todavía puede continuar."
+                : "Respuesta completada.";
+            elements.aiQuestionStatus.className = "vision-status success";
+        }
+    } catch (error) {
+        if (elements.aiQuestionStatus) {
+            elements.aiQuestionStatus.textContent = error.message;
+            elements.aiQuestionStatus.className = "vision-status error";
+        }
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Continuar análisis";
+        }
     }
 }
 
@@ -1552,15 +1601,17 @@ async function handleAiQuestion(event) {
     }
 
     try {
+        lastAiRequest = {
+            question,
+            organization_id: selectedNumericValue(elements.searchOrganization),
+            plant_id: selectedNumericValue(elements.searchPlant),
+            sector_id: sectorId,
+        };
         const response = await apiRequest(API.assistantAsk, {
             method: "POST",
-            body: {
-                question,
-                organization_id: selectedNumericValue(elements.searchOrganization),
-                plant_id: selectedNumericValue(elements.searchPlant),
-                sector_id: sectorId,
-            },
+            body: lastAiRequest,
         });
+        lastAiResponse = response;
         renderAiAnswer(response);
         if (elements.aiQuestionStatus) {
             elements.aiQuestionStatus.textContent = `Respuesta basada en ${response?.context_count || 0} fuente(s) indexada(s).`;
