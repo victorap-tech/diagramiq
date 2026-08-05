@@ -1876,7 +1876,19 @@ async function loadComponentCatalog() {
 }
 
 function componentCatalogParams() {
-    const params = componentCatalogParams();
+    const params = new URLSearchParams();
+    const organizationId = String(elements.componentOrganization?.value || "").trim();
+    const plantId = String(elements.componentPlant?.value || "").trim();
+    const sectorId = String(elements.componentSector?.value || "").trim();
+    const componentType = String(elements.componentType?.value || "").trim();
+    const query = String(elements.componentQuery?.value || "").trim();
+
+    if (organizationId) params.set("organization_id", organizationId);
+    if (plantId) params.set("plant_id", plantId);
+    if (sectorId) params.set("sector_id", sectorId);
+    if (componentType) params.set("component_type", componentType);
+    if (query) params.set("q", query);
+    params.set("limit", "500");
     return params;
 }
 
