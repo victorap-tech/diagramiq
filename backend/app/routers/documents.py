@@ -14,7 +14,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -691,14 +691,51 @@ def get_document_page_image(
 
 
 @router.get("/pages/{page_id}/image", include_in_schema=False)
-def get_page_image_by_id(page_id: int, db: Session = Depends(get_db)):
+def get_page_image_by_id(
+    page_id: int,
+    scale: float = 1.5,
+    db: Session = Depends(get_db),
+):
     page = db.query(models.DocumentPage).filter(models.DocumentPage.id == page_id).first()
-    if page is None or not page.image_path:
-        raise HTTPException(status_code=404, detail="Imagen de página no encontrada")
-    image_path = Path(page.image_path)
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail="La imagen ya no existe")
-    return FileResponse(image_path, media_type="image/png")
+    if page is None:
+        raise HTTPException(status_code=404, detail="Página no encontrada")
+
+    # Escala base: usa el PNG preprocesado. Para zoom nítido, renderiza el PDF original
+    # a la escala solicitada y cachea el resultado temporalmente.
+    requested_scale = max(1.0, min(float(scale or 1.5), 4.0))
+    if requested_scale <= 1.6 and page.image_path:
+        image_path = Path(page.image_path)
+        if image_path.exists():
+            return FileResponse(image_path, media_type="image/png")
+
+    document = db.query(models.Document).filter(models.Document.id == page.document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    try:
+        local_pdf = resolve_local_file(document.file_path)
+        cache_dir = Path("/tmp/diagramiq-hires")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        scale_key = str(requested_scale).replace(".", "_")
+        cache_path = cache_dir / f"page_{page.id}_s{scale_key}.png"
+        if not cache_path.exists():
+            pdf = fitz.open(str(local_pdf))
+            try:
+                pdf_page = pdf.load_page(max(0, int(page.page_number) - 1))
+                pixmap = pdf_page.get_pixmap(
+                    matrix=fitz.Matrix(requested_scale, requested_scale),
+                    alpha=False,
+                )
+                pixmap.save(str(cache_path))
+            finally:
+                pdf.close()
+        return FileResponse(cache_path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+    except Exception:
+        if page.image_path:
+            image_path = Path(page.image_path)
+            if image_path.exists():
+                return FileResponse(image_path, media_type="image/png")
+        raise HTTPException(status_code=404, detail="No se pudo renderizar la página")
 
 
 

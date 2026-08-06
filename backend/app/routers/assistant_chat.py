@@ -17,6 +17,24 @@ from app.routers.component_catalog import official_component_links, infer_manufa
 router = APIRouter(prefix="/assistant", tags=["Asistente IA"])
 
 
+AMBIGUOUS_COMPONENT_REFERENCES = {
+    "N", "PE", "M", "L", "L1", "L2", "L3", "A", "B", "C",
+    "BN", "BK", "BU", "GY", "RD", "WH", "GN", "YE", "SH",
+    "0V", "24V", "+24V", "L+", "M0", "U", "V", "W"
+}
+
+
+def _is_ambiguous_component_reference(value: str | None) -> bool:
+    normalized = normalize_reference(value or "")
+    if not normalized:
+        return True
+    if normalized in AMBIGUOUS_COMPONENT_REFERENCES:
+        return True
+    if re.fullmatch(r"\d{1,2}", normalized):
+        return True
+    return len(normalized) < 3
+
+
 class AssistantQuestion(BaseModel):
     question: str = Field(min_length=3, max_length=1500)
     organization_id: Optional[int] = None
@@ -299,14 +317,20 @@ CONTEXTO INDEXADO:
 """
     response = ask_text(prompt)
 
+    requested_references = {normalize_reference(ref) for ref in references if ref}
+    context_reference = normalize_reference(payload.context_reference or "")
+    if context_reference:
+        requested_references.add(context_reference)
+
     component_candidates = [
         item for item in snippets
-        if item.get("reference") and (
-            item.get("type") or item.get("model") or item.get("manufacturer")
-        )
+        if item.get("reference")
+        and not _is_ambiguous_component_reference(item.get("reference"))
+        and (item.get("type") or item.get("model") or item.get("manufacturer") or item.get("description"))
     ]
     component_candidates.sort(
         key=lambda item: (
+            1 if normalize_reference(item.get("reference") or "") in requested_references else 0,
             1 if item.get("is_current_context") else 0,
             1 if item.get("source_kind") == "plan" else 0,
             int(item.get("confidence") or 0),

@@ -1081,9 +1081,16 @@ function buildFallbackPageImageUrl(result) {
 
 
 function createOpenViewerButton(result, index) {
-    const imageUrl =
+    let imageUrl =
         normalizeImageUrl(getResultImageUrl(result)) ??
         buildFallbackPageImageUrl(result);
+
+    // Renderizado nítido desde el PDF original. Las coordenadas fueron indexadas
+    // a escala 1.5; el visor solicita escala 3 y ajusta el resaltado proporcionalmente.
+    if (imageUrl && imageUrl.includes("/documents/pages/")) {
+        imageUrl += `${imageUrl.includes("?") ? "&" : "?"}scale=3`;
+        state.viewer.renderRatio = 2;
+    }
 
     if (!imageUrl) {
         return `
@@ -2247,7 +2254,7 @@ function positionReferenceHighlight(coordinates) {
         return;
     }
 
-    const scale = state.viewer.scale;
+    const scale = state.viewer.scale * (state.viewer.renderRatio || 1);
 
     elements.referenceHighlight.style.left =
         `${coordinates.x * scale}px`;
@@ -2264,6 +2271,7 @@ function positionReferenceHighlight(coordinates) {
 
 function resetViewerZoom() {
     state.viewer.scale = 1;
+    state.viewer.renderRatio = 1;
 
     if (elements.viewerImage) {
         elements.viewerImage.style.transform = "scale(1)";
