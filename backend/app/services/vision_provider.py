@@ -175,12 +175,20 @@ def _call_anthropic(prompt: str, image_bytes: bytes, content_type: str, max_toke
         with urllib.request.urlopen(request, timeout=55) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise HTTPException(502, f"Anthropic no pudo analizar la foto: {_http_error_detail(exc)}") from exc
+        detail = _http_error_detail(exc)
+        logger.error("[VISION ANTHROPIC HTTP ERROR] status=%s model=%s detail=%s", exc.code, model, detail)
+        raise HTTPException(502, f"Anthropic no pudo analizar la foto: {detail}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
+        logger.exception("[VISION ANTHROPIC CONNECTION ERROR] model=%s", model)
         raise HTTPException(504, "Anthropic tardó demasiado o no respondió.") from exc
+    except Exception as exc:
+        logger.exception("[VISION ANTHROPIC UNEXPECTED ERROR] model=%s", model)
+        raise HTTPException(502, f"Error inesperado al consultar Anthropic: {type(exc).__name__}: {exc}") from exc
     text = _extract_anthropic_text(payload)
     if not text:
+        logger.error("[VISION ANTHROPIC EMPTY RESPONSE] model=%s keys=%s", model, list(payload.keys()))
         raise HTTPException(502, "Anthropic respondió sin texto utilizable.")
+    logger.info("[VISION ANTHROPIC OK] model=%s chars=%s", model, len(text))
     return VisionResponse(text=text, provider="anthropic", model=model)
 
 

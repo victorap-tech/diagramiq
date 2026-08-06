@@ -1,12 +1,15 @@
 import io
 import json
 import re
+import logging
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.services.vision_provider import analyze_image as analyze_with_provider
+
+logger = logging.getLogger("diagramiq.vision")
 
 router = APIRouter(prefix="/vision", tags=["DiagramIQ Vision"])
 
@@ -131,9 +134,22 @@ async def analyze_image(image: UploadFile = File(...)):
         "código de cable si existe. Respondé EXCLUSIVAMENTE JSON válido con: detected_kind, component_type, reference, cable_tag, "
         "brand, model, visible_text (lista), confidence entre 0 y 1 y description breve. Usá cadenas vacías si no se lee."
     )
-    ai_response = analyze_with_provider(prompt, image_bytes, content_type, max_tokens=500)
+    logger.info("[VISION ANALYZE] image_bytes=%s content_type=%s", len(image_bytes), content_type)
+    try:
+        ai_response = analyze_with_provider(prompt, image_bytes, content_type, max_tokens=500)
+    except HTTPException as exc:
+        logger.error("[VISION ANALYZE FAILED] status=%s detail=%s", exc.status_code, exc.detail)
+        raise
+    except Exception as exc:
+        logger.exception("[VISION ANALYZE UNEXPECTED]")
+        raise HTTPException(502, f"Vision falló: {type(exc).__name__}: {exc}") from exc
 
-    result = _parse_json(ai_response.text)
+    logger.info("[VISION RESPONSE] provider=%s model=%s chars=%s preview=%r", ai_response.provider, ai_response.model, len(ai_response.text), ai_response.text[:180])
+    try:
+        result = _parse_json(ai_response.text)
+    except HTTPException:
+        logger.error("[VISION JSON PARSE ERROR] provider=%s model=%s response=%r", ai_response.provider, ai_response.model, ai_response.text[:1000])
+        raise
     result["model_used"] = ai_response.model
     result["ai_provider"] = ai_response.provider
     if not result["search_query"]:
