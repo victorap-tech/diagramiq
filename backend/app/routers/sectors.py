@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -40,6 +42,17 @@ def create_sector(
             detail="El nombre del sector es obligatorio",
         )
 
+    existing = (
+        db.query(models.Sector)
+        .filter(
+            models.Sector.plant_id == sector.plant_id,
+            func.lower(models.Sector.name) == name.lower(),
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
+
     new_sector = models.Sector(
         name=name,
         description=sector.description,
@@ -47,8 +60,22 @@ def create_sector(
     )
 
     db.add(new_sector)
-    db.commit()
-    db.refresh(new_sector)
+    try:
+        db.commit()
+        db.refresh(new_sector)
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(models.Sector)
+            .filter(
+                models.Sector.plant_id == sector.plant_id,
+                func.lower(models.Sector.name) == name.lower(),
+            )
+            .first()
+        )
+        if existing is not None:
+            return existing
+        raise
 
     return new_sector
 

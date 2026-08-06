@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -54,6 +56,17 @@ def create_plant(
             detail="El nombre de la planta es obligatorio",
         )
 
+    existing = (
+        db.query(models.Plant)
+        .filter(
+            models.Plant.organization_id == organization.id,
+            func.lower(models.Plant.name) == name.lower(),
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
+
     new_plant = models.Plant(
         name=name,
         location=plant.location,
@@ -61,8 +74,22 @@ def create_plant(
     )
 
     db.add(new_plant)
-    db.commit()
-    db.refresh(new_plant)
+    try:
+        db.commit()
+        db.refresh(new_plant)
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(models.Plant)
+            .filter(
+                models.Plant.organization_id == organization.id,
+                func.lower(models.Plant.name) == name.lower(),
+            )
+            .first()
+        )
+        if existing is not None:
+            return existing
+        raise
 
     return new_plant
 

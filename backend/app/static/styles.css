@@ -1372,3 +1372,14 @@ textarea {
 }
 
 /* v0.12.7 — visor PDF en alta resolución y componente principal sin potenciales */
+
+
+/* v0.13.2 — jerarquía persistente */
+.hierarchy-manager-card { margin-top: 1.25rem; }
+.inline-field-actions { display: flex; gap: .65rem; align-items: stretch; }
+.inline-field-actions input { flex: 1; min-width: 0; }
+.inline-field-actions button { white-space: nowrap; }
+.hierarchy-summary { display: grid; gap: .65rem; margin-top: 1rem; }
+.hierarchy-item { display: flex; flex-direction: column; gap: .25rem; padding: .8rem 1rem; border: 1px solid var(--border-color, #dbe4ef); border-radius: 12px; background: rgba(245,248,252,.8); }
+.hierarchy-item span { color: var(--text-muted, #667085); }
+@media (max-width: 720px) { .inline-field-actions { flex-direction: column; } }

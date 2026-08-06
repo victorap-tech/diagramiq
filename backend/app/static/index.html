@@ -169,6 +169,48 @@
                     <div id="organizationsList" class="entity-list"></div>
                 </div>
             </div>
+
+            <div class="card hierarchy-manager-card">
+                <div class="card-heading">
+                    <div>
+                        <span class="section-label">Jerarquía persistente</span>
+                        <h3>Plantas y sectores</h3>
+                        <p>Creá la estructura antes de cargar documentos. Todo queda guardado en PostgreSQL.</p>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="hierarchyOrganization">Empresa</label>
+                        <select id="hierarchyOrganization">
+                            <option value="">Seleccionar empresa</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hierarchyPlantName">Nueva planta</label>
+                        <div class="inline-field-actions">
+                            <input id="hierarchyPlantName" type="text" maxlength="150" placeholder="Ej.: Virasoro">
+                            <button id="createHierarchyPlantButton" class="primary-button" type="button">Guardar planta</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="hierarchyPlant">Planta</label>
+                        <select id="hierarchyPlant" disabled>
+                            <option value="">Seleccionar planta</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="hierarchySectorName">Nuevo sector</label>
+                        <div class="inline-field-actions">
+                            <input id="hierarchySectorName" type="text" maxlength="150" placeholder="Ej.: Caldera 1">
+                            <button id="createHierarchySectorButton" class="primary-button" type="button">Guardar sector</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="hierarchyMessage" class="message hidden" role="status" aria-live="polite"></div>
+                <div id="hierarchySummary" class="hierarchy-summary"></div>
+            </div>
         </section>
 
         <!-- ========================= -->
@@ -405,8 +447,8 @@
                     </h2>
 
                     <p>
-                        Elegí una planta existente o creá una nueva y asociá el plano a un sector.
-                        El equipo es opcional.
+                        Primero creá la empresa, planta y sector en la pestaña Empresas.
+                        La carga exige una jerarquía completa y persistente.
                     </p>
                 </div>
             </div>
@@ -446,11 +488,11 @@
                         </select>
 
                         <small>
-                            Podés elegir una existente o crear una nueva.
+                            La planta debe estar creada previamente en Empresas.
                         </small>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group hidden">
                         <label for="newPlantName">
                             Nueva planta
                         </label>
@@ -477,11 +519,11 @@
                         </select>
 
                         <small>
-                            Podés elegir uno existente o escribir uno nuevo.
+                            El sector debe estar creado previamente en Empresas.
                         </small>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group hidden">
                         <label for="newSectorName">
                             Nuevo sector o línea
                         </label>
@@ -747,7 +789,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.13.1</span>
+        <span>DiagramIQ v0.13.2</span>
 
         <a
             href="/docs"

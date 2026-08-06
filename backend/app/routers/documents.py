@@ -541,9 +541,14 @@ def _recover_hierarchy(
     identidad estable; los IDs solo se usan como respaldo para archivos viejos.
     """
     organization_name, plant_name, sector_name = _manifest_hierarchy(manifest)
-    organization_name = _safe_name(organization_name, f"Empresa recuperada (bucket {organization_id})")
-    plant_name = _safe_name(plant_name, f"Planta recuperada (bucket {plant_id})")
-    sector_name = _safe_name(sector_name, f"Sector recuperado (bucket {sector_id})")
+    if not organization_name or not plant_name or not sector_name:
+        raise ValueError(
+            "El PDF no tiene manifiesto completo de empresa, planta y sector. "
+            "Asignalo manualmente o volvé a cargarlo con la jerarquía seleccionada."
+        )
+    organization_name = _safe_name(organization_name, organization_name)
+    plant_name = _safe_name(plant_name, plant_name)
+    sector_name = _safe_name(sector_name, sector_name)
 
     organization = (
         db.query(models.Organization)

@@ -49,6 +49,14 @@ const elements = {
     organizationMessage: document.getElementById("organizationMessage"),
     organizationsList: document.getElementById("organizationsList"),
     refreshOrganizationsButton: document.getElementById("refreshOrganizationsButton"),
+    hierarchyOrganization: document.getElementById("hierarchyOrganization"),
+    hierarchyPlant: document.getElementById("hierarchyPlant"),
+    hierarchyPlantName: document.getElementById("hierarchyPlantName"),
+    hierarchySectorName: document.getElementById("hierarchySectorName"),
+    createHierarchyPlantButton: document.getElementById("createHierarchyPlantButton"),
+    createHierarchySectorButton: document.getElementById("createHierarchySectorButton"),
+    hierarchyMessage: document.getElementById("hierarchyMessage"),
+    hierarchySummary: document.getElementById("hierarchySummary"),
 
     searchOrganization: document.getElementById("searchOrganization"),
     searchPlant: document.getElementById("searchPlant"),
@@ -444,6 +452,7 @@ async function loadOrganizations() {
 
         fillSelect(elements.searchOrganization, state.organizations, "Seleccionar empresa");
         fillSelect(elements.uploadOrganization, state.organizations, "Seleccionar empresa");
+        fillSelect(elements.hierarchyOrganization, state.organizations, "Seleccionar empresa");
 
         const validIds = new Set(state.organizations.map((item) => String(getObjectId(item))));
         const searchOrganizationId = validIds.has(String(previousSearchOrganization || ""))
@@ -628,10 +637,83 @@ async function createOrganization(event) {
     }
 }
 
+async function loadHierarchyPlants(organizationId, autoSelect = true) {
+    resetSelect(elements.hierarchyPlant, "Cargando plantas...");
+    if (!organizationId) {
+        resetSelect(elements.hierarchyPlant, "Seleccionar planta");
+        if (elements.hierarchyPlant) elements.hierarchyPlant.disabled = true;
+        if (elements.hierarchySummary) elements.hierarchySummary.innerHTML = "";
+        return;
+    }
+    try {
+        const plants = await fetchPlantsByOrganization(organizationId);
+        fillSelect(elements.hierarchyPlant, plants, plants.length ? "Seleccionar planta" : "No hay plantas");
+        if (elements.hierarchyPlant) elements.hierarchyPlant.disabled = false;
+        if (autoSelect && plants.length === 1) elements.hierarchyPlant.value = String(getObjectId(plants[0]));
+        await renderHierarchySummary();
+    } catch (error) {
+        resetSelect(elements.hierarchyPlant, "Error al cargar plantas");
+        showMessage(elements.hierarchyMessage, error.message, "error");
+    }
+}
+
+async function renderHierarchySummary() {
+    if (!elements.hierarchySummary) return;
+    const organizationId = elements.hierarchyOrganization?.value;
+    if (!organizationId) { elements.hierarchySummary.innerHTML = ""; return; }
+    const plants = await fetchPlantsByOrganization(organizationId);
+    const blocks = [];
+    for (const plant of plants) {
+        const sectors = await fetchSectorsByPlant(getObjectId(plant));
+        blocks.push(`<div class="hierarchy-item"><strong>${escapeHtml(plant.name)}</strong><span>${sectors.length ? sectors.map(s => escapeHtml(s.name)).join(" · ") : "Sin sectores"}</span></div>`);
+    }
+    elements.hierarchySummary.innerHTML = blocks.length ? blocks.join("") : '<p class="empty-state">Todavía no hay plantas para esta empresa.</p>';
+}
+
+async function createHierarchyPlant() {
+    hideMessage(elements.hierarchyMessage);
+    const organizationId = elements.hierarchyOrganization?.value;
+    const name = elements.hierarchyPlantName?.value.trim();
+    if (!organizationId) return showMessage(elements.hierarchyMessage, "Seleccioná una empresa.", "error");
+    if (!name) return showMessage(elements.hierarchyMessage, "Escribí el nombre de la planta.", "error");
+    try {
+        await apiRequest(API.plants, { method: "POST", body: { name, organization_id: normalizeId(organizationId) } });
+        elements.hierarchyPlantName.value = "";
+        await loadHierarchyPlants(organizationId, true);
+        await loadSearchPlants(organizationId, true);
+        await loadUploadPlants(organizationId, true);
+        showMessage(elements.hierarchyMessage, `Planta “${name}” guardada en PostgreSQL.`, "success");
+    } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+}
+
+async function createHierarchySector() {
+    hideMessage(elements.hierarchyMessage);
+    const plantId = elements.hierarchyPlant?.value;
+    const name = elements.hierarchySectorName?.value.trim();
+    if (!plantId) return showMessage(elements.hierarchyMessage, "Seleccioná una planta.", "error");
+    if (!name) return showMessage(elements.hierarchyMessage, "Escribí el nombre del sector.", "error");
+    try {
+        await apiRequest(API.sectors, { method: "POST", body: { name, plant_id: normalizeId(plantId) } });
+        elements.hierarchySectorName.value = "";
+        await renderHierarchySummary();
+        if (String(elements.searchPlant?.value || "") === String(plantId)) await loadSearchSectors(plantId, true);
+        if (String(elements.uploadPlant?.value || "") === String(plantId)) await loadUploadSectors(plantId, true);
+        showMessage(elements.hierarchyMessage, `Sector “${name}” guardado en PostgreSQL.`, "success");
+    } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+}
+
+function initializeHierarchyManagerEvents() {
+    elements.hierarchyOrganization?.addEventListener("change", (event) => loadHierarchyPlants(event.target.value, true));
+    elements.hierarchyPlant?.addEventListener("change", renderHierarchySummary);
+    elements.createHierarchyPlantButton?.addEventListener("click", createHierarchyPlant);
+    elements.createHierarchySectorButton?.addEventListener("click", createHierarchySector);
+}
+
 function initializeOrganizationEvents() {
     elements.organizationForm?.addEventListener("submit", createOrganization);
     elements.refreshOrganizationsButton?.addEventListener("click", loadOrganizations);
     elements.organizationsList?.addEventListener("click", handleOrganizationsListClick);
+    initializeHierarchyManagerEvents();
 }
 
 async function fetchPlantsByOrganization(organizationId) {
@@ -2676,10 +2758,8 @@ async function handleUploadSubmit(event) {
     hideMessage(elements.uploadMessage);
 
     const organizationId = elements.uploadOrganization?.value;
-    let plantId = elements.uploadPlant?.value;
-    const newPlantName = elements.newPlantName?.value.trim() ?? "";
-    let sectorId = elements.uploadSector?.value;
-    const newSectorName = elements.newSectorName?.value.trim() ?? "";
+    const plantId = elements.uploadPlant?.value;
+    const sectorId = elements.uploadSector?.value;
     const file = elements.pdfFile?.files?.[0];
 
     try {
@@ -2687,12 +2767,12 @@ async function handleUploadSubmit(event) {
             throw new Error("Seleccioná una empresa.");
         }
 
-        if (!plantId && !newPlantName) {
-            throw new Error("Seleccioná una planta existente o escribí una nueva.");
+        if (!plantId) {
+            throw new Error("Seleccioná una planta creada previamente en Empresas.");
         }
 
-        if (!sectorId && !newSectorName) {
-            throw new Error("Seleccioná un sector o escribí uno nuevo.");
+        if (!sectorId) {
+            throw new Error("Seleccioná un sector creado previamente en Empresas.");
         }
 
         validatePdfFile(file);
@@ -2700,23 +2780,6 @@ async function handleUploadSubmit(event) {
         setUploadLoading(true);
         updateUploadProgress(10, "Preparando documento...");
 
-        if (!plantId && newPlantName) {
-            updateUploadProgress(20, "Creando planta...");
-            plantId = await createPlantIfNeeded(organizationId, newPlantName);
-        }
-
-        if (!plantId) {
-            throw new Error("No se pudo obtener la planta.");
-        }
-
-        if (!sectorId && newSectorName) {
-            updateUploadProgress(35, "Creando sector...");
-            sectorId = await createSectorIfNeeded(plantId, newSectorName);
-        }
-
-        if (!sectorId) {
-            throw new Error("No se pudo obtener el sector.");
-        }
 
         const formData = new FormData();
 
