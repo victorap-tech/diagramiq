@@ -64,6 +64,7 @@ const elements = {
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     searchButton: document.getElementById("searchButton"),
+    searchClearButton: document.getElementById("searchClearButton"),
     detectedReferences: document.getElementById("detectedReferences"),
     searchMessage: document.getElementById("searchMessage"),
     searchLoading: document.getElementById("searchLoading"),
@@ -1069,6 +1070,24 @@ function clearSearchResults() {
 }
 
 
+function clearSpecificSearch() {
+    // Limpia solamente la búsqueda específica. Conserva Empresa, Planta y Sector.
+    if (elements.searchInput) elements.searchInput.value = "";
+    clearSearchResults();
+    hideMessage(elements.searchMessage);
+    setSearchLoading(false);
+
+    state.search.results = [];
+
+    // Si quedó abierto el visor de una coincidencia, cerrarlo también.
+    if (elements.viewerModal && !elements.viewerModal.classList.contains("hidden")) {
+        closeViewer();
+    }
+
+    elements.searchInput?.focus();
+}
+
+
 function setSearchLoading(isLoading) {
     elements.searchLoading?.classList.toggle("hidden", !isLoading);
 
@@ -1923,6 +1942,7 @@ async function copyAiResponse() {
 
 function initializeSearchEvents() {
     elements.searchForm?.addEventListener("submit", handleSearchSubmit);
+    elements.searchClearButton?.addEventListener("click", clearSpecificSearch);
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
     elements.componentPhoto?.addEventListener("change", handleComponentPhoto);
     elements.visionPhoto?.addEventListener("change", handleVisionPhoto);
