@@ -848,6 +848,59 @@ def list_components(
     counts = Counter(item["component_type"] for item in consolidated)
     return {"items": consolidated, "counts": dict(sorted(counts.items())), "total": len(consolidated)}
 
+INVENTORY_TYPE_ALIASES = {
+    "variador": {"variador", "variador de frecuencia", "vfd"},
+    "motor": {"motor", "motor eléctrico"},
+    "contactor": {"contactor"},
+    "guardamotor": {"guardamotor"},
+    "sensor": {"sensor"},
+    "válvula": {"válvula", "electroválvula"},
+    "relé": {"relé", "relé térmico"},
+    "PLC / módulo": {"plc", "módulo plc", "módulo de entradas", "módulo de salidas", "módulo analógico"},
+    "transformador": {"transformador"},
+    "interruptor": {"interruptor", "seccionador"},
+}
+
+def inventory_snapshot(
+    db: Session,
+    organization_id: int | None = None,
+    plant_id: int | None = None,
+    sector_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Devuelve equipos físicos consolidados para consultas cuantitativas del asistente.
+
+    Usa la misma fuente y reglas de la Biblioteca para evitar que IA y catálogo
+    cuenten universos distintos. Una aparición repetida en varias páginas se cuenta
+    una sola vez por referencia, documento y sector.
+    """
+    rows = _filtered_items(
+        db, organization_id, plant_id, sector_id, component_type=None, q=None, hard_limit=100000
+    )
+    rows = [item for item in rows if is_library_equipment(item, include_incomplete=True)]
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in rows:
+        item = dict(item)
+        item["manufacturer"] = infer_manufacturer(item.get("model"), item.get("manufacturer"))
+        item["component_type"] = infer_type(
+            item.get("reference") or "", item.get("component_type"), item.get("component_type"),
+            item.get("model"), item.get("description"),
+        )
+        key = (normalize_term(item.get("reference")), item.get("document_id"), item.get("sector_id"))
+        previous = grouped.get(key)
+        quality = (
+            1 if _is_reliable_model(item.get("model")) else 0,
+            int(item.get("catalog_confidence") or 0),
+            1 if item.get("manufacturer") else 0,
+        )
+        if previous is None or quality > previous.get("_inventory_quality", (-1, -1, -1)):
+            item["_inventory_quality"] = quality
+            grouped[key] = item
+    result = []
+    for item in grouped.values():
+        item.pop("_inventory_quality", None)
+        result.append(item)
+    return result
+
 
 @router.get("/export.xlsx")
 def export_components_excel(

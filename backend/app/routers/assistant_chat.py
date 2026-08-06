@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +13,9 @@ from app import models
 from app.database import get_db
 from app.services.pdf_service import extract_references, normalize_reference
 from app.services.vision_provider import ask_text
-from app.routers.component_catalog import official_component_links, infer_manufacturer, infer_type
+from app.routers.component_catalog import (
+    official_component_links, infer_manufacturer, infer_type, inventory_snapshot,
+)
 
 router = APIRouter(prefix="/assistant", tags=["Asistente IA"])
 
@@ -33,6 +36,79 @@ def _is_ambiguous_component_reference(value: str | None) -> bool:
     if re.fullmatch(r"\d{1,2}", normalized):
         return True
     return len(normalized) < 3
+
+
+
+
+INVENTORY_QUERY_TYPES = {
+    "variador": ("variador", "variadores", "vfd", "variadores de frecuencia"),
+    "motor": ("motor", "motores"),
+    "contactor": ("contactor", "contactores"),
+    "guardamotor": ("guardamotor", "guardamotores"),
+    "sensor": ("sensor", "sensores"),
+    "válvula": ("válvula", "valvula", "válvulas", "valvulas", "electroválvula", "electrovalvula"),
+    "relé": ("relé", "rele", "relés", "reles"),
+    "PLC / módulo": ("plc", "módulo plc", "modulo plc", "módulos plc", "modulos plc"),
+    "transformador": ("transformador", "transformadores"),
+    "interruptor": ("interruptor", "interruptores", "seccionador", "seccionadores"),
+}
+
+def _inventory_intent(question: str) -> tuple[bool, str | None, bool]:
+    q = question.lower()
+    is_count = bool(re.search(r"\b(cu[aá]ntos?|cantidad|total|n[uú]mero)\b", q))
+    wants_list = bool(re.search(r"\b(cu[aá]les|lista|listado|mostrar|mostrame|detalle)\b", q))
+    if not is_count and not wants_list:
+        return False, None, False
+    for canonical, aliases in INVENTORY_QUERY_TYPES.items():
+        if any(alias in q for alias in aliases):
+            return True, canonical, wants_list
+    if any(word in q for word in ("equipos", "componentes", "dispositivos")):
+        return True, None, wants_list
+    return False, None, False
+
+def _inventory_answer(payload: AssistantQuestion, db: Session) -> dict | None:
+    matched, requested_type, wants_list = _inventory_intent(payload.question)
+    if not matched:
+        return None
+    items = inventory_snapshot(db, payload.organization_id, payload.plant_id, payload.sector_id)
+    def canonical_type(value: str) -> str:
+        v = (value or "").strip().lower()
+        for canonical, aliases in INVENTORY_QUERY_TYPES.items():
+            if v == canonical.lower() or any(alias in v for alias in aliases):
+                return canonical
+        return value or "otro"
+    for item in items:
+        item["inventory_type"] = canonical_type(item.get("component_type") or "")
+    selected = [i for i in items if i["inventory_type"] == requested_type] if requested_type else items
+    scope=[]
+    if payload.organization_id: scope.append("la empresa seleccionada")
+    if payload.plant_id: scope.append("la planta seleccionada")
+    if payload.sector_id: scope.append("el sector seleccionado")
+    scope_text = " en " + ", ".join(scope) if scope else " en el catálogo indexado"
+    if requested_type:
+        label = requested_type if len(selected)==1 else ({"motor":"motores","variador":"variadores","contactor":"contactores","guardamotor":"guardamotores","sensor":"sensores","válvula":"válvulas","relé":"relés","transformador":"transformadores","interruptor":"interruptores"}.get(requested_type, requested_type))
+        lines=[f"## Inventario técnico", f"Se detectaron **{len(selected)} {label}**{scope_text}."]
+        manufacturers=Counter((i.get("manufacturer") or "Sin fabricante identificado") for i in selected)
+        if manufacturers:
+            lines.append("\n**Por fabricante:**")
+            lines.extend(f"- {name}: {count}" for name,count in manufacturers.most_common())
+        if wants_list and selected:
+            lines.append("\n**Equipos:**")
+            for i in sorted(selected, key=lambda x:(x.get("reference") or ""))[:100]:
+                model=f" — {i.get('model')}" if i.get('model') else ""
+                sector=f" — {i.get('sector_name')}" if i.get('sector_name') else ""
+                lines.append(f"- **{i.get('reference') or 'Sin TAG'}**{model}{sector}")
+    else:
+        counts=Counter(i["inventory_type"] for i in selected)
+        lines=["## Inventario técnico", f"Se detectaron **{len(selected)} equipos físicos**{scope_text}.", "\n**Por tipo:**"]
+        lines.extend(f"- {name}: {count}" for name,count in counts.most_common())
+    return {
+        "answer":"\n".join(lines), "provider":"DiagramIQ Catalog", "model":"structured-inventory",
+        "sources":[], "component_card":None, "detected_references":[], "context_count":0,
+        "incomplete":False, "continued":False, "context_applied":False,
+        "context_page_id":payload.context_page_id,
+        "inventory_summary":{"total":len(selected),"type":requested_type},
+    }
 
 
 class AssistantQuestion(BaseModel):
@@ -239,6 +315,10 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
     question = payload.question.strip()
     if not question:
         raise HTTPException(400, "Escribí una pregunta.")
+
+    inventory_response = _inventory_answer(payload, db)
+    if inventory_response is not None:
+        return inventory_response
 
     snippets, references = _collect_context(payload, db)
     if not snippets:
