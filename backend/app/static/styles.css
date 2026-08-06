@@ -1323,4 +1323,7 @@ textarea {
 .quality-review { background:#fff4d9; color:#825c00; }
 .component-sheet-async-status { position:absolute; right:1.25rem; top:1rem; font-size:.82rem; color:#667085; }
 
-/* v0.12.1 — Relaciones del asistente por ID interno */
+/* v0.12.2 — Motores sin modelo confirmados por evidencia técnica del plano */
+
+/* v0.12.2 — equipos físicos confirmados por evidencia del plano */
+.quality-evidence { background:#e8f3ff; color:#175b93; border:1px solid #b7d8f4; }

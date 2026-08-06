@@ -553,8 +553,41 @@ CHANNEL_OR_SUBELEMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+TECHNICAL_EVIDENCE_PATTERNS = (
+    re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b", re.IGNORECASE),
+    re.compile(r"\b\d+(?:[.,]\d+)?\s*V(?:AC|DC|\s*CA|\s*CC)?\b", re.IGNORECASE),
+    re.compile(r"\b\d+(?:[.,]\d+)?\s*A\b", re.IGNORECASE),
+    re.compile(r"\b\d{2,5}\s*(?:RPM|R/MIN)\b", re.IGNORECASE),
+    re.compile(r"\b(?:MOTOR|BOMBA|VENTILADOR|TRANSPORTADOR|REDLER|SINFIN|SINFÍN)\b", re.IGNORECASE),
+)
+
+
+def has_sufficient_technical_evidence(item: dict[str, Any]) -> bool:
+    """Acepta equipos físicos sin modelo cuando el plano aporta evidencia técnica suficiente.
+
+    Caso típico: un motor identificado por TAG con potencia, tensión/corriente o función,
+    aunque todavía no se haya leído la marca/modelo de la placa.
+    """
+    component_type = (item.get("component_type") or "").strip().lower()
+    if component_type != "motor":
+        return False
+    reference = (item.get("reference") or "").strip()
+    if len(normalize_term(reference)) < 4:
+        return False
+    text = " ".join(filter(None, (item.get("description"), item.get("row_text")))).strip()
+    matches = sum(1 for pattern in TECHNICAL_EVIDENCE_PATTERNS if pattern.search(text))
+    # Para un motor basta una función explícita + un dato eléctrico, o dos datos técnicos.
+    has_motor_context = bool(re.search(r"\b(?:MOTOR|REDLER|TRANSPORTADOR|BOMBA|VENTILADOR)\b", text, re.IGNORECASE))
+    electrical_matches = sum(1 for pattern in TECHNICAL_EVIDENCE_PATTERNS[:4] if pattern.search(text))
+    return (has_motor_context and electrical_matches >= 1) or electrical_matches >= 2 or matches >= 3
+
+
 def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False) -> bool:
-    """Deja en Biblioteca solo equipos físicos; señales y canales quedan en Buscar."""
+    """Deja en Biblioteca solo equipos físicos; señales y canales quedan en Buscar.
+
+    Los equipos con modelo confirmado se muestran siempre. Los motores sin modelo también
+    se muestran cuando el plano aporta evidencia técnica suficiente.
+    """
     reference = (item.get("reference") or "").strip()
     if is_nonphysical_reference(reference) or CHANNEL_OR_SUBELEMENT_RE.fullmatch(reference):
         return False
@@ -562,9 +595,11 @@ def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False)
     component_type = (item.get("component_type") or "").strip()
     reliable = _is_reliable_model(model)
     physical_type = component_type in PHYSICAL_LIBRARY_TYPES
+    evidence_confirmed = has_sufficient_technical_evidence(item)
+    item["evidence_confirmed"] = evidence_confirmed
     if include_incomplete:
         return reliable or physical_type
-    return reliable and physical_type
+    return physical_type and (reliable or evidence_confirmed)
 
 
 def _filtered_items(

@@ -171,3 +171,11 @@ Archivos principales modificados:
 - `Ver relacionados` del asistente usa el ID interno de la aparición identificada.
 - Las referencias ambiguas (`N`, `PE`, `M`, bornes y potenciales) no disparan búsquedas textuales incorrectas.
 - Se conserva documento, página y componente usados como fuente de la respuesta.
+
+
+## v0.12.2 — Equipos confirmados por evidencia del plano
+
+- Los motores físicos pueden aparecer en Biblioteca aunque todavía no tengan marca/modelo.
+- Se exige evidencia técnica suficiente: TAG no genérico y datos como potencia, tensión, corriente, RPM o función del equipo.
+- Las señales, potenciales y canales PLC continúan excluidos de la Biblioteca.
+- Las tarjetas diferencian “Modelo confirmado” de “Equipo confirmado por plano”.

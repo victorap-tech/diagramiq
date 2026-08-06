@@ -1877,9 +1877,13 @@ function renderComponentCatalog(items) {
             <p class="component-catalog-meta">
                 ${item.parent_reference ? `<span class="component-parent-reference">Módulo físico: ${escapeHtml(item.parent_reference)}</span><br>` : ''}
                 ${item.manufacturer ? `<strong>${escapeHtml(item.manufacturer)}</strong><br>` : ''}
-                ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : '<span class="muted">Modelo pendiente de confirmar</span><br>'}
+                ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : '<span class="muted">Modelo pendiente de identificar</span><br>'}
                 ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}<br>
-                ${item.model ? '<span class="quality-badge quality-complete">Ficha completa</span>' : '<span class="quality-badge quality-review">Revisar</span>'}
+                ${item.model
+                    ? '<span class="quality-badge quality-complete">Modelo confirmado</span>'
+                    : item.evidence_confirmed
+                        ? '<span class="quality-badge quality-evidence">Equipo confirmado por plano</span>'
+                        : '<span class="quality-badge quality-review">Revisar</span>'}
             </p>
             <div class="component-catalog-actions">
                 <button type="button" class="primary-button" data-open-component-sheet="${index}">Abrir ficha</button>
