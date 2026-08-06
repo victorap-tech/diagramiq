@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -24,7 +25,11 @@ from app.database import SessionLocal, get_db
 from app.services.pdf_service import process_pdf_document
 from app.services.storage_service import (
     delete_file, get_json, get_object_stream, is_s3_path, list_objects, put_json, resolve_local_file, storage_enabled, upload_file,
+    bucket_name, storage_config_status,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -536,6 +541,25 @@ def _recover_hierarchy(
     return sector
 
 
+@router.get("/bucket-status")
+def bucket_status():
+    """Diagnóstico seguro de la conexión al Bucket, sin exponer secretos."""
+    config = storage_config_status()
+    result = {**config, "reachable": False, "objects_found": 0, "documents_found": 0, "error": None}
+    if not config.get("enabled"):
+        result["error"] = "Faltan variables de conexión al Bucket"
+        return result
+    try:
+        objects = list_objects("documents/")
+        result["reachable"] = True
+        result["objects_found"] = len(objects)
+        result["documents_found"] = sum(1 for item in objects if str(item.get("key", "")).lower().endswith(".pdf"))
+    except Exception as exc:
+        logger.exception("No se pudo consultar el Bucket")
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 @router.post("/sync-bucket")
 def sync_documents_from_bucket(
     background_tasks: BackgroundTasks,
@@ -548,7 +572,23 @@ def sync_documents_from_bucket(
             detail="El Bucket no está configurado en este servicio",
         )
 
-    bucket_objects = list_objects("documents/")
+    configured_bucket = bucket_name()
+    if not configured_bucket:
+        config = storage_config_status()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo determinar el nombre del Bucket. Variables faltantes: {', '.join(config.get('missing_variables', []))}",
+        )
+
+    try:
+        bucket_objects = list_objects("documents/")
+    except Exception as exc:
+        logger.exception("Error listando documents/ en el Bucket")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No se pudo listar el Bucket: {type(exc).__name__}: {exc}",
+        ) from exc
+
     pdf_objects = [item for item in bucket_objects if str(item.get("key", "")).lower().endswith(".pdf")]
     found = len(pdf_objects)
     already_registered = 0
@@ -566,7 +606,7 @@ def sync_documents_from_bucket(
 
         values = match.groupdict()
         content_hash = values["hash"].lower()
-        storage_path = f"s3://{bucket_name()}/{key}"
+        storage_path = f"s3://{configured_bucket}/{key}"
         existing = (
             db.query(models.Document)
             .filter(
@@ -627,9 +667,10 @@ def sync_documents_from_bucket(
             db.refresh(document)
             recovered_ids.append(document.id)
             recovered += 1
-        except Exception:
+        except Exception as exc:
             db.rollback()
             ignored += 1
+            logger.exception("No se pudo recuperar el objeto %s: %s", key, exc)
 
     for document_id in recovered_ids:
         background_tasks.add_task(process_document_in_background, document_id)

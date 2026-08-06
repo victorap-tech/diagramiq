@@ -16,6 +16,7 @@ const API = {
     sectors: "/sectors",
     documents: "/documents",
     syncDocumentsBucket: "/documents/sync-bucket",
+    bucketStatus: "/documents/bucket-status",
     search: "/search",
     cableTagRecognize: "/cable-tags/recognize",
     componentRecognize: "/components/recognize",
@@ -3103,13 +3104,20 @@ async function syncDocumentsBucket() {
     const button = elements.refreshDocumentsButton;
     if (button) {
         button.disabled = true;
-        button.textContent = "Sincronizando...";
+        button.textContent = "Comprobando Bucket...";
     }
     hideMessage(elements.documentsMessage);
     elements.documentsLoading?.classList.remove("hidden");
     try {
+        const statusResult = await apiRequest(API.bucketStatus);
+        if (!statusResult?.enabled || !statusResult?.reachable) {
+            const missing = Array.isArray(statusResult?.missing_variables) ? statusResult.missing_variables.join(", ") : "";
+            const reason = statusResult?.error || (missing ? `Faltan variables: ${missing}` : "El Bucket no está accesible");
+            throw new Error(reason);
+        }
+        if (button) button.textContent = "Sincronizando...";
         const result = await apiRequest(API.syncDocumentsBucket, { method: "POST" });
-        showMessage(elements.documentsMessage, result?.message || "Bucket sincronizado.", "success");
+        showMessage(elements.documentsMessage, result?.message || `Bucket conectado: ${statusResult.documents_found || 0} PDF encontrados.`, "success");
         await loadDocuments();
         if (Number(result?.queued_for_indexing || 0) > 0) startDocumentProgressPolling();
     } catch (error) {
