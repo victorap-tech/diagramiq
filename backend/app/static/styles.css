@@ -1383,3 +1383,15 @@ textarea {
 .hierarchy-item { display: flex; flex-direction: column; gap: .25rem; padding: .8rem 1rem; border: 1px solid var(--border-color, #dbe4ef); border-radius: 12px; background: rgba(245,248,252,.8); }
 .hierarchy-item span { color: var(--text-muted, #667085); }
 @media (max-width: 720px) { .inline-field-actions { flex-direction: column; } }
+
+/* v0.13.3: administración normalizada de plantas y sectores */
+.hierarchy-plant-card { display:grid; gap:12px; padding:16px; border:1px solid var(--border); border-radius:14px; background:var(--surface); }
+.hierarchy-plant-heading, .hierarchy-sector-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.hierarchy-plant-heading > div:first-child, .hierarchy-sector-row > div:first-child { display:grid; gap:3px; }
+.hierarchy-plant-heading small, .hierarchy-sector-row small { color:var(--muted); }
+.hierarchy-sector-list { display:grid; gap:8px; padding-left:14px; border-left:3px solid #dce9f5; }
+.hierarchy-sector-row { padding:10px 0; border-bottom:1px solid var(--border); }
+.hierarchy-sector-row:last-child { border-bottom:0; }
+.hierarchy-actions { display:flex; flex-wrap:wrap; gap:7px; }
+.hierarchy-actions button { padding:7px 10px; font-size:.78rem; }
+@media (max-width:700px) { .hierarchy-plant-heading, .hierarchy-sector-row { align-items:stretch; flex-direction:column; } .hierarchy-actions button { flex:1; } }

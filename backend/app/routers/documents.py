@@ -1127,6 +1127,27 @@ def get_document(
     return document
 
 
+@router.patch(
+    "/{document_id}/move-sector",
+    response_model=schemas.DocumentResponse,
+)
+def move_document_sector(
+    document_id: int,
+    payload: schemas.DocumentMove,
+    db: Session = Depends(get_db),
+):
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    sector = db.query(models.Sector).filter(models.Sector.id == payload.sector_id).first()
+    if sector is None:
+        raise HTTPException(status_code=404, detail="Sector de destino no encontrado")
+    document.sector_id = sector.id
+    db.commit()
+    db.refresh(document)
+    return document
+
+
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,

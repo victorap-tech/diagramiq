@@ -1,4 +1,4 @@
-# DiagramIQ v0.13.2
+# DiagramIQ v0.13.3
 
 Base recomendada para comenzar desde cero con PostgreSQL y Bucket vacíos. Primero creá Empresa → Planta → Sector y luego cargá los documentos.
 

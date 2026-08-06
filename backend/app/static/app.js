@@ -664,10 +664,91 @@ async function renderHierarchySummary() {
     const plants = await fetchPlantsByOrganization(organizationId);
     const blocks = [];
     for (const plant of plants) {
-        const sectors = await fetchSectorsByPlant(getObjectId(plant));
-        blocks.push(`<div class="hierarchy-item"><strong>${escapeHtml(plant.name)}</strong><span>${sectors.length ? sectors.map(s => escapeHtml(s.name)).join(" · ") : "Sin sectores"}</span></div>`);
+        const plantId = getObjectId(plant);
+        const [sectors, plantStats] = await Promise.all([
+            fetchSectorsByPlant(plantId),
+            apiRequest(`${API.plants}/${plantId}/stats`).catch(() => ({ document_count: 0, child_count: 0 }))
+        ]);
+        const sectorRows = [];
+        for (const sector of sectors) {
+            const sectorId = getObjectId(sector);
+            const stats = await apiRequest(`${API.sectors}/${sectorId}/stats`).catch(() => ({ document_count: 0 }));
+            sectorRows.push(`
+                <div class="hierarchy-sector-row">
+                    <div><strong>${escapeHtml(sector.name)}</strong><small>${escapeHtml(stats.document_count || 0)} documento(s)</small></div>
+                    <div class="hierarchy-actions">
+                        <button class="secondary-button hierarchy-rename-sector" data-sector-id="${escapeHtml(sectorId)}" data-sector-name="${escapeHtml(sector.name)}" data-plant-id="${escapeHtml(plantId)}" type="button">Renombrar</button>
+                        <button class="danger-button hierarchy-delete-sector" data-sector-id="${escapeHtml(sectorId)}" data-sector-name="${escapeHtml(sector.name)}" data-document-count="${escapeHtml(stats.document_count || 0)}" type="button">Eliminar</button>
+                    </div>
+                </div>`);
+        }
+        blocks.push(`
+            <div class="hierarchy-item hierarchy-plant-card">
+                <div class="hierarchy-plant-heading">
+                    <div><strong>${escapeHtml(plant.name)}</strong><small>${escapeHtml(plantStats.child_count || sectors.length)} sector(es) · ${escapeHtml(plantStats.document_count || 0)} documento(s)</small></div>
+                    <div class="hierarchy-actions">
+                        <button class="secondary-button hierarchy-rename-plant" data-plant-id="${escapeHtml(plantId)}" data-plant-name="${escapeHtml(plant.name)}" data-organization-id="${escapeHtml(organizationId)}" type="button">Renombrar</button>
+                        <button class="danger-button hierarchy-delete-plant" data-plant-id="${escapeHtml(plantId)}" data-plant-name="${escapeHtml(plant.name)}" data-document-count="${escapeHtml(plantStats.document_count || 0)}" type="button">Eliminar</button>
+                    </div>
+                </div>
+                <div class="hierarchy-sector-list">${sectorRows.length ? sectorRows.join("") : '<span class="empty-state">Sin sectores</span>'}</div>
+            </div>`);
     }
     elements.hierarchySummary.innerHTML = blocks.length ? blocks.join("") : '<p class="empty-state">Todavía no hay plantas para esta empresa.</p>';
+}
+
+async function handleHierarchySummaryClick(event) {
+    const renamePlant = event.target.closest(".hierarchy-rename-plant");
+    if (renamePlant) {
+        const name = prompt("Nuevo nombre de la planta:", renamePlant.dataset.plantName || "");
+        if (!name?.trim()) return;
+        try {
+            await apiRequest(`${API.plants}/${renamePlant.dataset.plantId}`, { method: "PUT", body: { name: name.trim(), organization_id: normalizeId(renamePlant.dataset.organizationId) } });
+            await loadHierarchyPlants(renamePlant.dataset.organizationId, false);
+            await loadOrganizations();
+            showMessage(elements.hierarchyMessage, "Planta renombrada correctamente.", "success");
+        } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+        return;
+    }
+    const deletePlant = event.target.closest(".hierarchy-delete-plant");
+    if (deletePlant) {
+        const count = Number(deletePlant.dataset.documentCount || 0);
+        const message = count ? `La planta contiene ${count} documento(s). Primero movelos o eliminálos.` : `¿Eliminar la planta “${deletePlant.dataset.plantName}” y sus sectores vacíos?`;
+        if (count) return showMessage(elements.hierarchyMessage, message, "error");
+        if (!confirm(message)) return;
+        try {
+            await apiRequest(`${API.plants}/${deletePlant.dataset.plantId}`, { method: "DELETE" });
+            await loadHierarchyPlants(elements.hierarchyOrganization?.value, true);
+            await loadOrganizations();
+            showMessage(elements.hierarchyMessage, "Planta eliminada.", "success");
+        } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+        return;
+    }
+    const renameSector = event.target.closest(".hierarchy-rename-sector");
+    if (renameSector) {
+        const name = prompt("Nuevo nombre del sector:", renameSector.dataset.sectorName || "");
+        if (!name?.trim()) return;
+        try {
+            await apiRequest(`${API.sectors}/${renameSector.dataset.sectorId}`, { method: "PUT", body: { name: name.trim(), plant_id: normalizeId(renameSector.dataset.plantId) } });
+            await renderHierarchySummary();
+            await loadOrganizations();
+            showMessage(elements.hierarchyMessage, "Sector renombrado correctamente.", "success");
+        } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+        return;
+    }
+    const deleteSector = event.target.closest(".hierarchy-delete-sector");
+    if (deleteSector) {
+        const count = Number(deleteSector.dataset.documentCount || 0);
+        const message = count ? `El sector contiene ${count} documento(s). Primero movelos o eliminálos.` : `¿Eliminar el sector “${deleteSector.dataset.sectorName}”?`;
+        if (count) return showMessage(elements.hierarchyMessage, message, "error");
+        if (!confirm(message)) return;
+        try {
+            await apiRequest(`${API.sectors}/${deleteSector.dataset.sectorId}`, { method: "DELETE" });
+            await renderHierarchySummary();
+            await loadOrganizations();
+            showMessage(elements.hierarchyMessage, "Sector eliminado.", "success");
+        } catch (error) { showMessage(elements.hierarchyMessage, error.message, "error"); }
+    }
 }
 
 async function createHierarchyPlant() {
@@ -707,6 +788,7 @@ function initializeHierarchyManagerEvents() {
     elements.hierarchyPlant?.addEventListener("change", renderHierarchySummary);
     elements.createHierarchyPlantButton?.addEventListener("click", createHierarchyPlant);
     elements.createHierarchySectorButton?.addEventListener("click", createHierarchySector);
+    elements.hierarchySummary?.addEventListener("click", handleHierarchySummaryClick);
 }
 
 function initializeOrganizationEvents() {
@@ -3028,6 +3110,12 @@ function renderDocuments(documents) {
                             rel="noopener"
                         >Ver PDF</a>
                         <button
+                            class="secondary-button document-move-button"
+                            type="button"
+                            data-document-id="${escapeHtml(documentItem.id)}"
+                            data-document-title="${escapeHtml(title)}"
+                        >Mover</button>
+                        <button
                             class="secondary-button document-reindex-button"
                             type="button"
                             data-document-id="${escapeHtml(documentItem.id)}"
@@ -3112,6 +3200,33 @@ async function handleDocumentsListClick(event) {
             cancelButton.disabled = false;
             cancelButton.textContent = "Cancelar proceso";
         }
+        return;
+    }
+
+    const moveButton = event.target.closest(".document-move-button");
+    if (moveButton) {
+        try {
+            const organizations = state.organizations?.length ? state.organizations : toArray(await apiRequest(API.organizations));
+            if (!organizations.length) throw new Error("No hay empresas disponibles");
+            const orgText = organizations.map((o, i) => `${i + 1}. ${o.name}`).join("\n");
+            const orgChoice = Number(prompt(`Elegí la empresa de destino:\n${orgText}`));
+            const organization = organizations[orgChoice - 1];
+            if (!organization) return;
+            const plants = await fetchPlantsByOrganization(getObjectId(organization));
+            const plantText = plants.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
+            const plantChoice = Number(prompt(`Elegí la planta de destino:\n${plantText}`));
+            const plant = plants[plantChoice - 1];
+            if (!plant) return;
+            const sectors = await fetchSectorsByPlant(getObjectId(plant));
+            const sectorText = sectors.map((sec, i) => `${i + 1}. ${sec.name}`).join("\n");
+            const sectorChoice = Number(prompt(`Elegí el sector de destino:\n${sectorText}`));
+            const sector = sectors[sectorChoice - 1];
+            if (!sector) return;
+            if (!confirm(`¿Mover “${moveButton.dataset.documentTitle}” a ${organization.name} / ${plant.name} / ${sector.name}?`)) return;
+            await apiRequest(`${API.documents}/${moveButton.dataset.documentId}/move-sector`, { method: "PATCH", body: { sector_id: normalizeId(getObjectId(sector)) } });
+            showMessage(elements.documentsMessage, "Documento movido sin volver a subirlo ni reindexarlo.", "success");
+            await loadDocuments();
+        } catch (error) { showMessage(elements.documentsMessage, `No se pudo mover: ${error.message}`, "error"); }
         return;
     }
 

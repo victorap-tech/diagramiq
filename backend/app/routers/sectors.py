@@ -162,6 +162,18 @@ def update_sector(
             detail="El nombre del sector es obligatorio",
         )
 
+    duplicate = (
+        db.query(models.Sector)
+        .filter(
+            models.Sector.id != sector_id,
+            models.Sector.plant_id == sector_data.plant_id,
+            func.lower(models.Sector.name) == name.lower(),
+        )
+        .first()
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Ya existe otro sector con ese nombre en la planta")
+
     sector.name = name
     sector.description = sector_data.description
     sector.plant_id = sector_data.plant_id
@@ -170,6 +182,16 @@ def update_sector(
     db.refresh(sector)
 
     return sector
+
+
+@router.get("/{sector_id}/stats")
+def sector_stats(sector_id: int, db: Session = Depends(get_db)):
+    sector = db.query(models.Sector).filter(models.Sector.id == sector_id).first()
+    if sector is None:
+        raise HTTPException(status_code=404, detail="Sector no encontrado")
+    document_count = db.query(models.Document).filter(models.Document.sector_id == sector_id).count()
+    equipment_count = db.query(models.Equipment).filter(models.Equipment.sector_id == sector_id).count()
+    return {"id": sector.id, "name": sector.name, "document_count": document_count, "child_count": equipment_count}
 
 
 @router.delete(
@@ -192,6 +214,12 @@ def delete_sector(
             detail="Sector no encontrado",
         )
 
+    document_count = db.query(models.Document).filter(models.Document.sector_id == sector_id).count()
+    if document_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"No se puede eliminar el sector: contiene {document_count} documento(s). Movelos o eliminá los documentos primero.",
+        )
     db.delete(sector)
     db.commit()
 

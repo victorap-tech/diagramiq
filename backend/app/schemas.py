@@ -95,6 +95,17 @@ class DocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentMove(BaseModel):
+    sector_id: int
+
+
+class HierarchyStatsResponse(BaseModel):
+    id: int
+    name: str
+    document_count: int = 0
+    child_count: int = 0
+
+
 class DocumentPageResponse(BaseModel):
     id: int
     page_number: int
