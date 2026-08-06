@@ -582,6 +582,113 @@ def has_sufficient_technical_evidence(item: dict[str, Any]) -> bool:
     return (has_motor_context and electrical_matches >= 1) or electrical_matches >= 2 or matches >= 3
 
 
+def _context_around_reference(page_text: str | None, reference: str, radius: int = 420) -> str:
+    """Devuelve el bloque de texto cercano a una referencia detectada en una página."""
+    text = page_text or ""
+    if not text or not reference:
+        return ""
+    match = re.search(re.escape(reference), text, re.IGNORECASE)
+    if not match:
+        return ""
+    start = max(0, match.start() - radius)
+    end = min(len(text), match.end() + radius)
+    block = text[start:end]
+    return re.sub(r"\s+", " ", block).strip()
+
+
+def _infer_physical_type_from_page(reference: str, context: str) -> str:
+    """Clasifica equipos físicos que existen en el índice textual pero aún no en el catálogo.
+
+    Esto unifica la fuente usada por Buscar/IA con la Biblioteca. Se mantiene
+    deliberadamente conservador para no convertir señales o potenciales en equipos.
+    """
+    upper = (context or "").upper()
+    ref = re.escape((reference or "").upper())
+    if not upper or is_nonphysical_reference(reference) or is_plc_channel(reference):
+        return ""
+    # Motores: designación M junto al TAG, o conjunto inequívoco de datos de placa.
+    motor_tag = bool(re.search(rf"(?:^|[\s;|])M\s*[-:=]?\s*{ref}(?:$|[\s;|])", upper))
+    electrical = sum(1 for pattern in TECHNICAL_EVIDENCE_PATTERNS[:4] if pattern.search(upper))
+    motor_words = bool(re.search(r"\b(?:MOTOR|REDLER|TRANSPORTADOR|BOMBA|VENTILADOR|SINF[IÍ]N)\b", upper))
+    if motor_tag or (electrical >= 2 and motor_words) or electrical >= 3:
+        return "motor"
+    for pattern, label in (
+        (r"\b(?:VARIADOR|FREQUENZUMRICHTER|FREQUENCY CONVERTER|SINAMICS|ALTIVAR|VLT)\b", "variador"),
+        (r"\b(?:GUARDAMOTOR|MOTOR PROTECT|3RV)\b", "guardamotor"),
+        (r"\b(?:CONTACTOR|SCHÜTZ|3RT)\b", "contactor"),
+        (r"\b(?:SENSOR|PROXIM|ENCODER)\b", "sensor"),
+        (r"\b(?:ELECTROV[ÁA]LVULA|SOLENOID|VALVE|V[ÁA]LVULA)\b", "válvula"),
+        (r"\b(?:TRANSFORMADOR|TRANSFORMER)\b", "transformador"),
+    ):
+        if re.search(pattern, upper):
+            return label
+    return ""
+
+
+def _sync_catalog_from_page_index(
+    db: Session,
+    q: str | None,
+    organization_id: int | None,
+    plant_id: int | None,
+    sector_id: int | None,
+) -> int:
+    """Materializa fichas faltantes desde el mismo texto que usa Buscar/IA.
+
+    Antes, una referencia podía ser encontrada por el asistente pero no existir en
+    ``component_references``. Esta sincronización bajo demanda crea solo equipos
+    físicos con evidencia técnica suficiente y evita duplicados por página.
+    """
+    reference = (q or "").strip()
+    normalized = normalize_term(reference)
+    if len(normalized) < 4 or is_nonphysical_reference(reference) or is_plc_channel(reference):
+        return 0
+
+    query = (
+        db.query(models.DocumentPage, models.Document, models.Sector, models.Plant, models.Organization)
+        .join(models.Document, models.DocumentPage.document_id == models.Document.id)
+        .join(models.Sector, models.Document.sector_id == models.Sector.id)
+        .join(models.Plant, models.Sector.plant_id == models.Plant.id)
+        .join(models.Organization, models.Plant.organization_id == models.Organization.id)
+        .filter(models.DocumentPage.text_content.ilike(f"%{reference}%"))
+    )
+    if organization_id is not None:
+        query = query.filter(models.Organization.id == organization_id)
+    if plant_id is not None:
+        query = query.filter(models.Plant.id == plant_id)
+    if sector_id is not None:
+        query = query.filter(models.Sector.id == sector_id)
+
+    created = 0
+    for page, document, sector, plant, organization in query.limit(50).all():
+        context = _context_around_reference(page.text_content, reference)
+        physical_type = _infer_physical_type_from_page(reference, context)
+        if not physical_type:
+            continue
+        duplicate = (
+            db.query(models.ComponentReference.id)
+            .filter(models.ComponentReference.document_page_id == page.id)
+            .filter(models.ComponentReference.normalized_reference == normalized)
+            .first()
+        )
+        if duplicate:
+            continue
+        db.add(models.ComponentReference(
+            reference=reference.upper(),
+            normalized_reference=normalized,
+            component_type=physical_type,
+            detected_type=physical_type,
+            row_text=context,
+            description=context,
+            source_kind="plan-derived",
+            catalog_confidence=85,
+            document_page_id=page.id,
+        ))
+        created += 1
+    if created:
+        db.commit()
+    return created
+
+
 def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False) -> bool:
     """Deja en Biblioteca solo equipos físicos; señales y canales quedan en Buscar.
 
@@ -665,6 +772,11 @@ def list_components(
     include_incomplete: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
+    # Sincroniza el catálogo con el índice textual usado por Buscar/IA. Así un
+    # motor confirmado en el plano también aparece inmediatamente en Biblioteca.
+    if q and q.strip():
+        _sync_catalog_from_page_index(db, q, organization_id, plant_id, sector_id)
+
     raw_items = _filtered_items(
         db, organization_id, plant_id, sector_id, component_type, q, hard_limit=10000
     )
