@@ -562,10 +562,13 @@ def bucket_status():
 
 @router.post("/sync-bucket")
 def sync_documents_from_bucket(
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """Sincroniza documents/ del Bucket con la BD y reindexa sólo lo faltante."""
+    """Sincroniza documents/ del Bucket con la BD sin iniciar indexaciones.
+
+    El Bucket conserva los PDF originales. El índice se reconstruye únicamente
+    cuando el usuario pulsa Procesar/Reindexar en un documento concreto.
+    """
     if not storage_enabled():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -593,9 +596,8 @@ def sync_documents_from_bucket(
     found = len(pdf_objects)
     already_registered = 0
     recovered = 0
-    queued = 0
+    index_missing = 0
     ignored = 0
-    recovered_ids: list[int] = []
 
     for item in pdf_objects:
         key = str(item.get("key") or "")
@@ -618,15 +620,16 @@ def sync_documents_from_bucket(
         )
         if existing is not None:
             already_registered += 1
-            # Si existe pero perdió el índice, lo reanuda sin volver a subir.
-            if not existing.pages and str(existing.processing_status or "").lower() not in {"pending", "processing"}:
-                existing.processing_status = "pending"
-                existing.processing_stage = "waiting"
+            # Si el PDF existe pero el índice no, lo deja disponible sin procesarlo.
+            # Nunca se inicia una indexación desde el botón Actualizar.
+            if not existing.pages and str(existing.processing_status or "").lower() != "processing":
+                existing.processing_status = "uploaded"
+                existing.processing_stage = "index_missing"
                 existing.processing_progress = 0
-                existing.processing_message = "Recuperado del Bucket; esperando reindexación"
+                existing.processed_pages = 0
+                existing.processing_message = "PDF recuperado; índice faltante. Procesar manualmente"
                 db.commit()
-                background_tasks.add_task(process_document_in_background, existing.id)
-                queued += 1
+                index_missing += 1
             continue
 
         manifest_key = key.rsplit(".", 1)[0] + ".json"
@@ -655,37 +658,34 @@ def sync_documents_from_bucket(
                 description=(str(manifest.get("description")).strip() if manifest.get("description") else "Recuperado automáticamente desde el Bucket"),
                 document_type=(str(manifest.get("document_type")).strip() if manifest.get("document_type") else "plano_electrico"),
                 page_count=page_count,
-                processing_status="pending",
-                processing_stage="waiting",
+                processing_status="uploaded",
+                processing_stage="index_missing",
                 processing_progress=0,
                 processed_pages=0,
-                processing_message="Recuperado del Bucket; esperando indexación",
+                processing_message="PDF recuperado; índice faltante. Procesar manualmente",
                 sector_id=sector.id,
             )
             db.add(document)
             db.commit()
             db.refresh(document)
-            recovered_ids.append(document.id)
             recovered += 1
+            index_missing += 1
         except Exception as exc:
             db.rollback()
             ignored += 1
             logger.exception("No se pudo recuperar el objeto %s: %s", key, exc)
 
-    for document_id in recovered_ids:
-        background_tasks.add_task(process_document_in_background, document_id)
-        queued += 1
-
     return {
         "found": found,
         "already_registered": already_registered,
         "recovered": recovered,
-        "queued_for_indexing": queued,
+        "queued_for_indexing": 0,
+        "index_missing": index_missing,
         "ignored": ignored,
         "message": (
             f"Bucket sincronizado: {found} PDF encontrados, "
-            f"{already_registered} ya registrados, {recovered} recuperados "
-            f"y {queued} enviados a indexación."
+            f"{already_registered} ya registrados y {recovered} recuperados. "
+            f"No se inició ninguna indexación. {index_missing} documento(s) requieren procesamiento manual."
         ),
     }
 

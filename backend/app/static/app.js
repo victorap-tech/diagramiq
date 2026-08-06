@@ -3117,9 +3117,8 @@ async function syncDocumentsBucket() {
         }
         if (button) button.textContent = "Sincronizando...";
         const result = await apiRequest(API.syncDocumentsBucket, { method: "POST" });
-        showMessage(elements.documentsMessage, result?.message || `Bucket conectado: ${statusResult.documents_found || 0} PDF encontrados.`, "success");
+        showMessage(elements.documentsMessage, result?.message || `Bucket conectado: ${statusResult.documents_found || 0} PDF encontrados. No se inició ninguna indexación.`, "success");
         await loadDocuments();
-        if (Number(result?.queued_for_indexing || 0) > 0) startDocumentProgressPolling();
     } catch (error) {
         showMessage(elements.documentsMessage, `No se pudo sincronizar el Bucket: ${error.message}`, "error");
     } finally {
