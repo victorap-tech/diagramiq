@@ -127,10 +127,10 @@ ensure_processing_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.11.4",
+    version="0.11.5",
 )
 
-APP_VERSION = "0.11.4"
+APP_VERSION = "0.11.5"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent

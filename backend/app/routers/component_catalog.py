@@ -158,13 +158,53 @@ def _module_occurrence_score(row: dict[str, Any], reference: str, model: str) ->
     return (score, 1 if model and normalize_term(model) in normalize_term(text) else 0, 1 if row.get("x") is not None else 0, -(row.get("page_number") or 0))
 
 
-def _plc_module_occurrences(db: Session, item: dict[str, Any]) -> list[dict[str, Any]]:
-    """Ubicaciones candidatas del hardware físico del módulo, separadas del canal."""
+def _infer_module_instance_reference(db: Session, channel_occurrences: list[dict[str, Any]], channel: str) -> str:
+    """Intenta obtener la designación física del módulo (p. ej. KE1.3) desde la página del canal."""
+    channel_norm = normalize_term(channel)
+    for occurrence in channel_occurrences[:5]:
+        page_id = occurrence.get("page_id")
+        if not page_id:
+            continue
+        page = db.query(models.DocumentPage).filter(models.DocumentPage.id == page_id).first()
+        if not page or not page.text_content:
+            continue
+        text = page.text_content
+        compact = normalize_term(text)
+        pos = compact.find(channel_norm)
+        # Si la normalización impide localizar el índice exacto, usamos toda la página.
+        window = text if pos < 0 else text[max(0, pos - 1200): pos + 1200]
+        tags = re.findall(r"[-=]([A-Z]{1,5}\d+(?:\.\d+)*)", window.upper())
+        # Priorizamos designaciones típicas de módulos/racks y descartamos el propio canal.
+        ranked = []
+        for tag in tags:
+            if normalize_term(tag) == channel_norm:
+                continue
+            score = 0
+            if re.match(r"^(?:KE|ET|PLC|A|E|K)\d", tag):
+                score += 5
+            if "." in tag:
+                score += 2
+            if tag.startswith(("Q", "I")):
+                score -= 3
+            ranked.append((score, tag))
+        if ranked:
+            ranked.sort(reverse=True)
+            return ranked[0][1]
+    return ""
+
+
+def _plc_module_occurrences(
+    db: Session,
+    item: dict[str, Any],
+    module_instance_reference: str = "",
+) -> list[dict[str, Any]]:
+    """Ubicaciones físicas plausibles del módulo, sin búsquedas masivas por textos genéricos."""
     document_id = item.get("document_id")
     reference = (item.get("reference") or item.get("parent_reference") or "").strip()
     model = (item.get("model") or "").strip()
     if not document_id:
         return []
+
     rows = (
         db.query(models.ComponentReference, models.DocumentPage, models.Document)
         .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
@@ -172,28 +212,49 @@ def _plc_module_occurrences(db: Session, item: dict[str, Any]) -> list[dict[str,
         .filter(models.Document.id == document_id)
         .all()
     )
+
     candidates: list[dict[str, Any]] = []
-    seen: set[tuple[Any, ...]] = set()
+    seen_pages: set[int] = set()
     ref_norm = normalize_term(reference)
     model_norm = normalize_term(model)
+    instance_norm = normalize_term(module_instance_reference)
+
     for ref, page, document in rows:
-        ref_model = _best_model_from_page(ref.reference or "", page.text_content or "", ref.model)
-        same_reference = bool(ref_norm and normalize_term(ref.reference) == ref_norm)
+        page_text = page.text_content or ""
+        row_text = f"{ref.row_text or ''} {ref.description or ''} {ref.reference or ''} {ref.model or ''}"
+        page_norm = normalize_term(page_text)
+        row_norm = normalize_term(row_text)
+        ref_model = _best_model_from_page(ref.reference or "", page_text, ref.model)
         same_model = bool(model_norm and normalize_term(ref_model) == model_norm)
-        # Una ubicación de módulo debe corresponder al mismo identificador o al
-        # mismo modelo físico; no alcanza con que el texto mencione el canal.
-        if not (same_reference or same_model):
+        exact_model_in_row = bool(model_norm and model_norm in row_norm)
+        exact_model_on_page = bool(model_norm and model_norm in page_norm)
+        same_reference = bool(ref_norm and normalize_term(ref.reference) == ref_norm)
+        instance_on_page = bool(instance_norm and instance_norm in page_norm)
+        instance_in_row = bool(instance_norm and instance_norm in row_norm)
+
+        # Con una designación física inferida, exigimos que la página contenga esa
+        # designación y el modelo exacto. Así evitamos cientos/miles de páginas del
+        # mismo modelo instaladas en otros racks o sectores.
+        if instance_norm:
+            if not ((instance_on_page or instance_in_row) and (exact_model_in_row or exact_model_on_page or same_model)):
+                continue
+        else:
+            # Sin designación física, solo aceptamos coincidencias fuertes: modelo
+            # exacto junto al registro, o referencia exacta acompañada por el modelo.
+            if not (exact_model_in_row or (same_reference and exact_model_on_page)):
+                continue
+
+        if page.id in seen_pages:
             continue
+        seen_pages.add(page.id)
         payload = _reference_location_payload(ref, page, document)
         payload["model"] = ref_model or model
-        key = (page.id, ref.x, ref.y, normalize_term(ref.reference), normalize_term(ref_model))
-        if key in seen:
-            continue
-        seen.add(key)
+        payload["module_instance_reference"] = module_instance_reference
         candidates.append(payload)
-    candidates.sort(key=lambda row: _module_occurrence_score(row, reference, model), reverse=True)
-    return candidates
 
+    candidates.sort(key=lambda row: _module_occurrence_score(row, module_instance_reference or reference, model), reverse=True)
+    # Una ficha física debe mostrar pocas ubicaciones candidatas y verificables.
+    return candidates[:20]
 
 def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: str) -> bool:
     """Vincula canal y módulo sin confundir sus ubicaciones.
@@ -204,7 +265,8 @@ def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: s
     channel_occurrences = _plc_channel_occurrences(db, item, query_value)
     if not channel_occurrences:
         return False
-    module_occurrences = _plc_module_occurrences(db, item)
+    module_instance_reference = _infer_module_instance_reference(db, channel_occurrences, query_value)
+    module_occurrences = _plc_module_occurrences(db, item, module_instance_reference)
 
     parent = item.get("reference") or "módulo"
     channel = query_value.strip().upper()
@@ -219,6 +281,7 @@ def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: s
     item["match_reason"] = f"Canal exacto del módulo {parent}"
     item["channel_occurrences"] = channel_occurrences
     item["module_occurrences"] = module_occurrences
+    item["module_instance_reference"] = module_instance_reference
     item["channel_page_count"] = len({row["page_number"] for row in channel_occurrences})
     item["module_page_count"] = len({row["page_number"] for row in module_occurrences})
 

@@ -1906,6 +1906,13 @@ function componentSheetMarkup(payload, sourceItem = {}) {
         </div>`;
 }
 
+function openViewerFromComponentSheet(dialog, item, kind) {
+    state.viewer.returnDialog = dialog;
+    dialog.dataset.reopenAfterViewer = '1';
+    dialog.close();
+    openComponentLocations(item, kind);
+}
+
 async function openComponentSheet(item) {
     if (!item?.id) return;
     document.getElementById('componentSheetDialog')?.remove();
@@ -1915,16 +1922,22 @@ async function openComponentSheet(item) {
     dialog.innerHTML = `<div class="relations-dialog-body"><div class="loading-state">Cargando ficha técnica…</div></div>`;
     document.body.appendChild(dialog);
     dialog.addEventListener('click', (event) => event.stopPropagation());
-    dialog.addEventListener('close', () => dialog.remove());
+    dialog.addEventListener('close', () => {
+        if (dialog.dataset.reopenAfterViewer === '1') return;
+        dialog.remove();
+    });
     dialog.showModal();
 
     const load = async () => {
         const payload = await apiRequest(API.componentLibrary(item.id));
         dialog.querySelector('.relations-dialog-body').innerHTML = componentSheetMarkup(payload, item);
-        dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => dialog.close());
-        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'component'); });
-        dialog.querySelector('[data-sheet-open-module]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'component'); });
-        dialog.querySelector('[data-sheet-open-channel]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'channel'); });
+        dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => {
+            dialog.dataset.reopenAfterViewer = '0';
+            dialog.close();
+        });
+        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'component'));
+        dialog.querySelector('[data-sheet-open-module]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'component'));
+        dialog.querySelector('[data-sheet-open-channel]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'channel'));
         dialog.querySelectorAll('[data-delete-asset]').forEach(button => button.addEventListener('click', async () => {
             if (!confirm('¿Eliminar este archivo asociado?')) return;
             await apiRequest(`/component-library/assets/${button.dataset.deleteAsset}`, {method:'DELETE'});
@@ -1962,7 +1975,10 @@ async function showComponentGraph(item) {
     dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Siguiendo circuito</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-graph>✕</button></div><div class="loading-state">Buscando el origen y el destino del circuito…</div></div>`;
     document.body.appendChild(dialog);
     dialog.querySelector('[data-close-graph]').addEventListener('click', () => dialog.close());
-    dialog.addEventListener('close', () => dialog.remove());
+    dialog.addEventListener('close', () => {
+        if (dialog.dataset.reopenAfterViewer === '1') return;
+        dialog.remove();
+    });
     dialog.showModal();
     try {
         const response = await apiRequest(`${API.componentRelations}/${item.id}/graph?depth=2`);
@@ -2002,7 +2018,10 @@ async function showComponentRelations(item) {
     dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Analizando relaciones</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-relations>✕</button></div><div class="loading-state">Buscando componentes relacionados en la misma página…</div></div>`;
     document.body.appendChild(dialog);
     dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
-    dialog.addEventListener('close', () => dialog.remove());
+    dialog.addEventListener('close', () => {
+        if (dialog.dataset.reopenAfterViewer === '1') return;
+        dialog.remove();
+    });
     dialog.showModal();
     try {
         const response = await apiRequest(`${API.componentRelations}/${item.id}`);
@@ -2336,6 +2355,13 @@ function closeViewer() {
     state.viewer.resultIndex = -1;
     state.viewer.coordinates = null;
     resetViewerZoom();
+
+    const returnDialog = state.viewer.returnDialog;
+    state.viewer.returnDialog = null;
+    if (returnDialog && returnDialog.isConnected) {
+        returnDialog.dataset.reopenAfterViewer = '0';
+        try { returnDialog.showModal(); } catch (_) {}
+    }
 }
 
 
