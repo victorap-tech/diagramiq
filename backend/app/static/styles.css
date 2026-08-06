@@ -1322,3 +1322,5 @@ textarea {
 .quality-complete { background:#e8f7ee; color:#17653a; }
 .quality-review { background:#fff4d9; color:#825c00; }
 .component-sheet-async-status { position:absolute; right:1.25rem; top:1rem; font-size:.82rem; color:#667085; }
+
+/* v0.12.1 — Relaciones del asistente por ID interno */

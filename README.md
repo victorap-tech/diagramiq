@@ -164,3 +164,10 @@ Archivos principales modificados:
 - Opción Mostrar fichas incompletas.
 - Apertura inmediata de fichas y carga diferida de documentación.
 - Consulta de apariciones optimizada para no recorrer todo el PDF al abrir una ficha.
+
+
+## v0.12.1 — Relaciones por componente identificado
+
+- `Ver relacionados` del asistente usa el ID interno de la aparición identificada.
+- Las referencias ambiguas (`N`, `PE`, `M`, bornes y potenciales) no disparan búsquedas textuales incorrectas.
+- Se conserva documento, página y componente usados como fuente de la respuesta.

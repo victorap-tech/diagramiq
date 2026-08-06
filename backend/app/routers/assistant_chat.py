@@ -103,6 +103,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 )
             seen_pages.add(page.id)
             snippets.append({
+                "reference_id": current_ref.id if current_ref else None,
                 "reference": current_ref.reference if current_ref else (payload.context_reference or ""),
                 "type": (current_ref.detected_type or current_ref.component_type or "") if current_ref else "",
                 "model": (current_ref.model or "") if current_ref else "",
@@ -152,6 +153,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 continue
             seen_pages.add(page.id)
             snippets.append({
+                "reference_id": ref.id,
                 "reference": ref.reference,
                 "type": ref.detected_type or ref.component_type or "",
                 "model": ref.model or "",
@@ -185,6 +187,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 continue
             seen_pages.add(page.id)
             snippets.append({
+                "reference_id": None,
                 "reference": "",
                 "type": "",
                 "model": "",
@@ -245,6 +248,7 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
         )
         context_blocks.append(f"{header}\n{details}\nTexto indexado:\n{item['text']}")
         sources.append({
+            "component_id": item.get("reference_id"),
             "document_id": item["document_id"],
             "page_id": item["page_id"],
             "document_title": item["document_title"],
@@ -331,6 +335,7 @@ CONTEXTO INDEXADO:
         )
         official_links = official_component_links(resolved_manufacturer, primary.get("model"))
         component_card = {
+            "component_id": primary.get("reference_id"),
             "reference": primary.get("reference") or "",
             "type": resolved_type,
             "manufacturer": resolved_manufacturer,

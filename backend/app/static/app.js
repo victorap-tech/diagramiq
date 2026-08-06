@@ -1473,6 +1473,19 @@ function retryVisionPhoto() {
 }
 
 
+function isAmbiguousComponentReference(value) {
+    const normalized = String(value || "").trim().toUpperCase().replace(/^[-=+]+/, "");
+    if (!normalized) return true;
+    const ambiguous = new Set([
+        "N", "PE", "M", "L", "L1", "L2", "L3", "A", "B", "C",
+        "BN", "BK", "BU", "GY", "RD", "WH", "GN", "YE", "SH",
+        "0V", "24V", "+24V", "L+", "M0"
+    ]);
+    if (ambiguous.has(normalized)) return true;
+    if (/^\d{1,2}$/.test(normalized)) return true;
+    return normalized.length < 3;
+}
+
 function renderAiAnswer(response) {
     if (!elements.aiAnswer) return;
     const answer = escapeHtml(String(response?.answer || "")).replace(/\n/g, "<br>");
@@ -1505,7 +1518,7 @@ function renderAiAnswer(response) {
             </div>
             <div class="ai-card-actions">
                 <button type="button" class="primary-button ai-open-source" data-source-index="${Number(card.source_index || 0)}">Ver en plano</button>
-                <button type="button" class="secondary-button ai-search-related" data-reference="${escapeHtml(card.reference || "")}">Ver relacionados</button>
+                <button type="button" class="secondary-button ai-search-related" data-component-id="${Number(card.component_id || 0)}" data-reference="${escapeHtml(card.reference || "")}" data-model="${escapeHtml(card.model || "")}">Ver relacionados</button>
                 ${card.manual_url ? `<a class="secondary-button" href="${escapeHtml(card.manual_url)}" target="_blank" rel="noopener noreferrer">Manual oficial</a>` : ''}
                 ${card.product_url ? `<a class="secondary-button" href="${escapeHtml(card.product_url)}" target="_blank" rel="noopener noreferrer">Página oficial</a>` : ''}
             </div>
@@ -1534,9 +1547,28 @@ function renderAiAnswer(response) {
         });
     });
     elements.aiAnswer.querySelectorAll(".ai-search-related").forEach((button) => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
+            const componentId = Number(button.dataset.componentId || 0);
             const reference = String(button.dataset.reference || "").trim();
-            if (!reference) return;
+            const model = String(button.dataset.model || "").trim();
+
+            // Las relaciones pertenecen a la aparición concreta identificada por la IA.
+            // Nunca se vuelve a buscar por textos ambiguos como N, PE, M o números de borne.
+            if (componentId > 0) {
+                await showComponentRelations({ id: componentId, reference, model });
+                return;
+            }
+
+            if (isAmbiguousComponentReference(reference)) {
+                showMessage(
+                    elements.aiQuestionStatus,
+                    `La referencia “${reference || "sin referencia"}” no es única. Volvé a abrir el componente desde el plano para conservar su identificación exacta.`,
+                    "error",
+                );
+                return;
+            }
+
+            // Compatibilidad con respuestas antiguas que no traían el ID interno.
             elements.searchInput.value = reference;
             elements.searchForm?.requestSubmit();
         });
