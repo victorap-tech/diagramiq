@@ -1,4 +1,5 @@
 import hashlib
+import re
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +23,7 @@ from app import models, schemas
 from app.database import SessionLocal, get_db
 from app.services.pdf_service import process_pdf_document
 from app.services.storage_service import (
-    delete_file, get_object_stream, is_s3_path, resolve_local_file, storage_enabled, upload_file,
+    delete_file, get_json, get_object_stream, is_s3_path, list_objects, put_json, resolve_local_file, storage_enabled, upload_file,
 )
 
 
@@ -420,6 +421,39 @@ def upload_document(
         db.commit()
         db.refresh(new_document)
 
+        # Manifiesto persistente: permite reconstruir la base desde el Bucket
+        # después de un deploy, incluso si la BD local quedó vacía.
+        if is_s3_path(stored_path):
+            try:
+                put_json(
+                    object_key.rsplit(".", 1)[0] + ".json",
+                    {
+                        "schema_version": 1,
+                        "title": clean_title,
+                        "filename": original_filename,
+                        "content_hash": content_hash,
+                        "description": clean_description,
+                        "document_type": clean_document_type,
+                        "page_count": page_count,
+                        "organization": {
+                            "id": sector.plant.organization.id,
+                            "name": sector.plant.organization.name,
+                        },
+                        "plant": {
+                            "id": sector.plant.id,
+                            "name": sector.plant.name,
+                        },
+                        "sector": {
+                            "id": sector.id,
+                            "name": sector.name,
+                        },
+                    },
+                )
+            except Exception:
+                # El PDF ya está seguro. Un fallo del manifiesto no debe
+                # invalidar la carga principal.
+                pass
+
     except Exception as exc:
         db.rollback()
 
@@ -436,6 +470,183 @@ def upload_document(
     background_tasks.add_task(process_document_in_background, new_document.id)
 
     return new_document
+
+
+
+_BUCKET_DOCUMENT_RE = re.compile(
+    r"^documents/(?P<organization_id>\d+)/(?P<plant_id>\d+)/(?P<sector_id>\d+)/(?P<hash>[0-9a-fA-F]{64})\.pdf$"
+)
+
+
+def _safe_name(value: object, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text[:150] if text else fallback
+
+
+def _recover_hierarchy(
+    db: Session,
+    organization_id: int,
+    plant_id: int,
+    sector_id: int,
+    manifest: dict | None,
+) -> models.Sector:
+    """Recupera o crea la jerarquía necesaria para registrar un PDF del Bucket."""
+    manifest = manifest or {}
+    organization_data = manifest.get("organization") if isinstance(manifest.get("organization"), dict) else {}
+    plant_data = manifest.get("plant") if isinstance(manifest.get("plant"), dict) else {}
+    sector_data = manifest.get("sector") if isinstance(manifest.get("sector"), dict) else {}
+
+    organization = db.query(models.Organization).filter(models.Organization.id == organization_id).first()
+    if organization is None:
+        organization_name = _safe_name(
+            organization_data.get("name"),
+            f"Empresa recuperada (bucket {organization_id})",
+        )
+        organization = db.query(models.Organization).filter(func.lower(models.Organization.name) == organization_name.lower()).first()
+        if organization is None:
+            organization = models.Organization(name=organization_name)
+            db.add(organization)
+            db.flush()
+
+    plant = db.query(models.Plant).filter(models.Plant.id == plant_id).first()
+    if plant is None:
+        plant_name = _safe_name(plant_data.get("name"), f"Planta recuperada (bucket {plant_id})")
+        plant = (
+            db.query(models.Plant)
+            .filter(models.Plant.organization_id == organization.id, func.lower(models.Plant.name) == plant_name.lower())
+            .first()
+        )
+        if plant is None:
+            plant = models.Plant(name=plant_name, organization_id=organization.id)
+            db.add(plant)
+            db.flush()
+
+    sector = db.query(models.Sector).filter(models.Sector.id == sector_id).first()
+    if sector is None:
+        sector_name = _safe_name(sector_data.get("name"), f"Sector recuperado (bucket {sector_id})")
+        sector = (
+            db.query(models.Sector)
+            .filter(models.Sector.plant_id == plant.id, func.lower(models.Sector.name) == sector_name.lower())
+            .first()
+        )
+        if sector is None:
+            sector = models.Sector(name=sector_name, plant_id=plant.id)
+            db.add(sector)
+            db.flush()
+    return sector
+
+
+@router.post("/sync-bucket")
+def sync_documents_from_bucket(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Sincroniza documents/ del Bucket con la BD y reindexa sólo lo faltante."""
+    if not storage_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="El Bucket no está configurado en este servicio",
+        )
+
+    bucket_objects = list_objects("documents/")
+    pdf_objects = [item for item in bucket_objects if str(item.get("key", "")).lower().endswith(".pdf")]
+    found = len(pdf_objects)
+    already_registered = 0
+    recovered = 0
+    queued = 0
+    ignored = 0
+    recovered_ids: list[int] = []
+
+    for item in pdf_objects:
+        key = str(item.get("key") or "")
+        match = _BUCKET_DOCUMENT_RE.match(key)
+        if not match:
+            ignored += 1
+            continue
+
+        values = match.groupdict()
+        content_hash = values["hash"].lower()
+        storage_path = f"s3://{bucket_name()}/{key}"
+        existing = (
+            db.query(models.Document)
+            .filter(
+                (models.Document.file_path == storage_path)
+                | (models.Document.content_hash == content_hash)
+            )
+            .order_by(models.Document.id.asc())
+            .first()
+        )
+        if existing is not None:
+            already_registered += 1
+            # Si existe pero perdió el índice, lo reanuda sin volver a subir.
+            if not existing.pages and str(existing.processing_status or "").lower() not in {"pending", "processing"}:
+                existing.processing_status = "pending"
+                existing.processing_stage = "waiting"
+                existing.processing_progress = 0
+                existing.processing_message = "Recuperado del Bucket; esperando reindexación"
+                db.commit()
+                background_tasks.add_task(process_document_in_background, existing.id)
+                queued += 1
+            continue
+
+        manifest_key = key.rsplit(".", 1)[0] + ".json"
+        manifest = get_json(manifest_key) or {}
+        try:
+            sector = _recover_hierarchy(
+                db,
+                int(values["organization_id"]),
+                int(values["plant_id"]),
+                int(values["sector_id"]),
+                manifest,
+            )
+            title = _safe_name(manifest.get("title"), f"Documento recuperado {content_hash[:12]}")
+            filename = _safe_name(manifest.get("filename"), f"{content_hash}.pdf")
+            page_count = manifest.get("page_count")
+            try:
+                page_count = int(page_count) if page_count is not None else None
+            except (TypeError, ValueError):
+                page_count = None
+
+            document = models.Document(
+                title=title,
+                filename=filename,
+                file_path=storage_path,
+                content_hash=content_hash,
+                description=(str(manifest.get("description")).strip() if manifest.get("description") else "Recuperado automáticamente desde el Bucket"),
+                document_type=(str(manifest.get("document_type")).strip() if manifest.get("document_type") else "plano_electrico"),
+                page_count=page_count,
+                processing_status="pending",
+                processing_stage="waiting",
+                processing_progress=0,
+                processed_pages=0,
+                processing_message="Recuperado del Bucket; esperando indexación",
+                sector_id=sector.id,
+            )
+            db.add(document)
+            db.commit()
+            db.refresh(document)
+            recovered_ids.append(document.id)
+            recovered += 1
+        except Exception:
+            db.rollback()
+            ignored += 1
+
+    for document_id in recovered_ids:
+        background_tasks.add_task(process_document_in_background, document_id)
+        queued += 1
+
+    return {
+        "found": found,
+        "already_registered": already_registered,
+        "recovered": recovered,
+        "queued_for_indexing": queued,
+        "ignored": ignored,
+        "message": (
+            f"Bucket sincronizado: {found} PDF encontrados, "
+            f"{already_registered} ya registrados, {recovered} recuperados "
+            f"y {queued} enviados a indexación."
+        ),
+    }
 
 
 @router.post("/cleanup-duplicates")

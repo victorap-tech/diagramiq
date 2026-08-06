@@ -15,6 +15,7 @@ const API = {
     plants: "/plants",
     sectors: "/sectors",
     documents: "/documents",
+    syncDocumentsBucket: "/documents/sync-bucket",
     search: "/search",
     cableTagRecognize: "/cable-tags/recognize",
     componentRecognize: "/components/recognize",
@@ -3098,8 +3099,32 @@ async function cleanupDuplicateDocuments() {
     }
 }
 
+async function syncDocumentsBucket() {
+    const button = elements.refreshDocumentsButton;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Sincronizando...";
+    }
+    hideMessage(elements.documentsMessage);
+    elements.documentsLoading?.classList.remove("hidden");
+    try {
+        const result = await apiRequest(API.syncDocumentsBucket, { method: "POST" });
+        showMessage(elements.documentsMessage, result?.message || "Bucket sincronizado.", "success");
+        await loadDocuments();
+        if (Number(result?.queued_for_indexing || 0) > 0) startDocumentProgressPolling();
+    } catch (error) {
+        showMessage(elements.documentsMessage, `No se pudo sincronizar el Bucket: ${error.message}`, "error");
+    } finally {
+        elements.documentsLoading?.classList.add("hidden");
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Actualizar";
+        }
+    }
+}
+
 function initializeDocumentEvents() {
-    elements.refreshDocumentsButton?.addEventListener("click", loadDocuments);
+    elements.refreshDocumentsButton?.addEventListener("click", syncDocumentsBucket);
     elements.cleanupDocumentsButton?.addEventListener("click", cleanupDuplicateDocuments);
     elements.documentsList?.addEventListener("click", handleDocumentsListClick);
 }

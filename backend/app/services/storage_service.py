@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
@@ -209,3 +210,54 @@ def delete_file(storage_path: str | Path) -> None:
         path = BASE_DIR / path
     if path.exists():
         path.unlink()
+
+
+def list_objects(prefix: str = "") -> list[dict]:
+    """Lista todos los objetos del Bucket bajo un prefijo, con paginación."""
+    if not storage_enabled():
+        return []
+    client = get_s3_client()
+    bucket = bucket_name()
+    paginator = client.get_paginator("list_objects_v2")
+    objects: list[dict] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []) or []:
+            key = str(item.get("Key") or "")
+            if not key or key.endswith("/"):
+                continue
+            objects.append({
+                "key": key,
+                "size": int(item.get("Size") or 0),
+                "last_modified": item.get("LastModified"),
+                "etag": str(item.get("ETag") or "").strip('\"'),
+            })
+    return objects
+
+
+def put_json(object_key: str, payload: dict) -> str | None:
+    """Guarda metadatos JSON al lado del PDF para poder reconstruir la BD."""
+    if not storage_enabled():
+        return None
+    client = get_s3_client()
+    bucket = bucket_name()
+    body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+    client.put_object(
+        Bucket=bucket,
+        Key=object_key,
+        Body=body,
+        ContentType="application/json; charset=utf-8",
+    )
+    return f"s3://{bucket}/{object_key}"
+
+
+def get_json(object_key: str) -> dict | None:
+    """Lee un JSON del Bucket; devuelve None si no existe o es inválido."""
+    if not storage_enabled():
+        return None
+    try:
+        response = get_s3_client().get_object(Bucket=bucket_name(), Key=object_key)
+        raw = response["Body"].read()
+        value = json.loads(raw.decode("utf-8"))
+        return value if isinstance(value, dict) else None
+    except Exception:
+        return None
