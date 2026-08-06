@@ -1395,3 +1395,8 @@ textarea {
 .hierarchy-actions { display:flex; flex-wrap:wrap; gap:7px; }
 .hierarchy-actions button { padding:7px 10px; font-size:.78rem; }
 @media (max-width:700px) { .hierarchy-plant-heading, .hierarchy-sector-row { align-items:stretch; flex-direction:column; } .hierarchy-actions button { flex:1; } }
+
+
+/* v0.13.6: vista previa y análisis real de DiagramIQ Vision */
+.vision-preview-panel { margin-top: 14px; padding: 12px; border: 1px solid #d7e4f1; border-radius: 14px; background: #f7fbff; }
+.vision-preview { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 10px; background: #101820; }

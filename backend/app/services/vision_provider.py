@@ -28,15 +28,24 @@ class VisionResponse:
 
 
 def _selected_provider() -> str:
-    provider = os.getenv("AI_PROVIDER", "openai").strip().lower()
+    """Selecciona proveedor sin dejar Vision inactivo por una variable vieja.
+
+    Si AI_PROVIDER no está definido o contiene un valor no reconocido, se usa
+    Anthropic cuando existe ANTHROPIC_API_KEY y OpenAI como segunda opción.
+    """
+    raw = os.getenv("AI_PROVIDER", "").strip().lower()
     aliases = {"claude": "anthropic", "open_ai": "openai"}
-    provider = aliases.get(provider, provider)
-    if provider not in {"openai", "anthropic"}:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI_PROVIDER debe ser 'openai' o 'anthropic'.",
-        )
-    return provider
+    provider = aliases.get(raw, raw)
+    if provider in {"openai", "anthropic"}:
+        return provider
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return "anthropic"
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return "openai"
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Falta configurar ANTHROPIC_API_KEY u OPENAI_API_KEY en Railway.",
+    )
 
 
 def _http_error_detail(exc: urllib.error.HTTPError) -> str:

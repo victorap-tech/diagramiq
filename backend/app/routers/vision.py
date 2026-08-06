@@ -1,5 +1,8 @@
+import io
 import json
 import re
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
@@ -8,7 +11,24 @@ from app.services.vision_provider import analyze_image as analyze_with_provider
 router = APIRouter(prefix="/vision", tags=["DiagramIQ Vision"])
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+
+
+
+
+def _normalize_image(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
+    """Corrige orientación, reduce fotos enormes y entrega JPEG compatible."""
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            image.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=88, optimize=True)
+            return output.getvalue(), "image/jpeg"
+    except (UnidentifiedImageError, OSError):
+        if content_type in {"image/jpeg", "image/png", "image/webp"}:
+            return image_bytes, content_type
+        raise HTTPException(415, "No se pudo interpretar la foto. Usá JPG, PNG o WEBP.")
 
 
 def _extract_output_text(payload: dict) -> str:
@@ -31,8 +51,14 @@ def _parse_json(text: str) -> dict:
         cleaned = re.sub(r"\s*```$", "", cleaned)
     try:
         raw = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(502, "La IA respondió en un formato inesperado. Probá nuevamente.") from exc
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if not match:
+            raise HTTPException(502, "La IA respondió en un formato inesperado. Probá nuevamente.")
+        try:
+            raw = json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(502, "La IA respondió en un formato inesperado. Probá nuevamente.") from exc
 
     try:
         confidence = max(0.0, min(1.0, float(raw.get("confidence", 0))))
@@ -73,6 +99,12 @@ def _parse_json(text: str) -> dict:
     }
 
 
+@router.get("/status")
+def vision_status():
+    from app.services.vision_provider import provider_status
+    return provider_status()
+
+
 @router.post("/analyze")
 async def analyze_image(image: UploadFile = File(...)):
     """Modo automático tipo Lens: detecta TAG, componente o texto de una hoja y prepara la búsqueda."""
@@ -85,6 +117,8 @@ async def analyze_image(image: UploadFile = File(...)):
         raise HTTPException(422, "La imagen está vacía.")
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "La imagen supera el límite de 8 MB.")
+
+    image_bytes, content_type = _normalize_image(image_bytes, content_type)
 
     prompt = (
         "Actuá como DiagramIQ Vision, un Google Lens industrial. Analizá solamente lo visible en la foto y no inventes. "

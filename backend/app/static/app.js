@@ -74,6 +74,10 @@ const elements = {
     componentPhoto: document.getElementById("componentPhoto"),
     componentPhotoStatus: document.getElementById("componentPhotoStatus"),
     visionPhoto: document.getElementById("visionPhoto"),
+    visionPreviewPanel: document.getElementById("visionPreviewPanel"),
+    visionPreview: document.getElementById("visionPreview"),
+    visionAnalyzeButton: document.getElementById("visionAnalyzeButton"),
+    visionCancelButton: document.getElementById("visionCancelButton"),
     visionStatus: document.getElementById("visionStatus"),
     visionResult: document.getElementById("visionResult"),
     visionResultTitle: document.getElementById("visionResultTitle"),
@@ -1596,15 +1600,43 @@ function visionKindLabel(kind) {
     return ({ cable_tag: "TAG de cable", component: "Componente", document: "Plano o documento", unknown: "Elemento" })[kind] || "Elemento";
 }
 
-async function handleVisionPhoto(event) {
+let pendingVisionFile = null;
+let pendingVisionPreviewUrl = "";
+
+function clearVisionPreview() {
+    if (pendingVisionPreviewUrl) URL.revokeObjectURL(pendingVisionPreviewUrl);
+    pendingVisionPreviewUrl = "";
+    pendingVisionFile = null;
+    if (elements.visionPreview) elements.visionPreview.removeAttribute("src");
+    elements.visionPreviewPanel?.classList.add("hidden");
+    if (elements.visionPhoto) elements.visionPhoto.value = "";
+}
+
+function handleVisionPhoto(event) {
     const file = event.target.files?.[0];
+    if (!file) return;
+    clearVisionPreview();
+    pendingVisionFile = file;
+    pendingVisionPreviewUrl = URL.createObjectURL(file);
+    if (elements.visionPreview) elements.visionPreview.src = pendingVisionPreviewUrl;
+    elements.visionPreviewPanel?.classList.remove("hidden");
+    elements.visionResult?.classList.add("hidden");
+    if (elements.visionStatus) {
+        elements.visionStatus.textContent = "Foto lista. Tocá Analizar imagen.";
+        elements.visionStatus.className = "vision-status";
+    }
+}
+
+async function analyzePendingVisionPhoto() {
+    const file = pendingVisionFile;
     if (!file) return;
     lastVisionQuery = "";
     lastVisionResult = null;
+    if (elements.visionAnalyzeButton) elements.visionAnalyzeButton.disabled = true;
     if (elements.visionCircuitButton) elements.visionCircuitButton.disabled = true;
     elements.visionResult?.classList.add("hidden");
     if (elements.visionStatus) {
-        elements.visionStatus.textContent = "Analizando foto...";
+        elements.visionStatus.textContent = "Analizando foto con IA...";
         elements.visionStatus.className = "vision-status loading";
     }
     const formData = new FormData();
@@ -1621,7 +1653,7 @@ async function handleVisionPhoto(event) {
         const rows = [
             ["TAG", response?.cable_tag], ["Referencia", response?.reference],
             ["Marca", response?.brand], ["Modelo", response?.model],
-            ["Descripción", response?.description],
+            ["Descripción", response?.description], ["Modelo IA", response?.model_used],
         ].filter(([, value]) => String(value || "").trim());
         if (elements.visionResultDetails) {
             elements.visionResultDetails.innerHTML = rows.map(([label, value]) =>
@@ -1629,20 +1661,21 @@ async function handleVisionPhoto(event) {
             ).join("") || `<div><strong>${escapeHtml(response?.message || "No se pudo leer información suficiente.")}</strong></div>`;
         }
         if (elements.visionStatus) {
-            elements.visionStatus.textContent = lastVisionQuery ? `Listo para buscar: ${lastVisionQuery}` : (response?.message || "Acercá la cámara y probá otra vez.");
+            elements.visionStatus.textContent = lastVisionQuery ? `Detectado: ${lastVisionQuery}` : (response?.message || "Acercá la cámara al TAG o a la placa y probá otra vez.");
             elements.visionStatus.className = `vision-status ${lastVisionQuery ? "success" : "error"}`;
         }
         if (elements.visionSearchButton) elements.visionSearchButton.disabled = !lastVisionQuery;
         const canFollowCircuit = response?.detected_kind === "component" && Boolean(String(response?.reference || response?.model || "").trim());
         if (elements.visionCircuitButton) elements.visionCircuitButton.disabled = !canFollowCircuit;
         elements.visionResult?.classList.remove("hidden");
+        elements.visionPreviewPanel?.classList.add("hidden");
     } catch (error) {
         if (elements.visionStatus) {
             elements.visionStatus.textContent = error.message;
             elements.visionStatus.className = "vision-status error";
         }
     } finally {
-        event.target.value = "";
+        if (elements.visionAnalyzeButton) elements.visionAnalyzeButton.disabled = false;
     }
 }
 
@@ -1946,6 +1979,8 @@ function initializeSearchEvents() {
     elements.cableTagPhoto?.addEventListener("change", handleCableTagPhoto);
     elements.componentPhoto?.addEventListener("change", handleComponentPhoto);
     elements.visionPhoto?.addEventListener("change", handleVisionPhoto);
+    elements.visionAnalyzeButton?.addEventListener("click", analyzePendingVisionPhoto);
+    elements.visionCancelButton?.addEventListener("click", clearVisionPreview);
     elements.visionSearchButton?.addEventListener("click", searchLastVisionResult);
     elements.visionCircuitButton?.addEventListener("click", followLastVisionCircuit);
     elements.visionRetryButton?.addEventListener("click", retryVisionPhoto);
