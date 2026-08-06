@@ -562,8 +562,11 @@ textarea {
 .modal-content {
     position: relative;
     width: min(1100px, 96vw);
+    height: min(92vh, 980px);
     max-height: 92vh;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
     background: var(--surface);
     border-radius: 16px;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.28);
@@ -660,10 +663,14 @@ textarea {
 }
 
 .viewer-canvas {
-    max-height: calc(92vh - 78px);
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
     overflow: auto;
+    overscroll-behavior: contain;
     padding: 24px;
     background: #202734;
+    scrollbar-gutter: stable both-edges;
 }
 
 .viewer-image-wrapper {
@@ -1329,3 +1336,18 @@ textarea {
 .quality-evidence { background:#e8f3ff; color:#175b93; border:1px solid #b7d8f4; }
 
 /* v0.12.3 — catálogo sincronizado con el índice textual de Buscar/IA */
+
+
+/* v0.12.4 — ficha de motores estructurada y visor desplazable */
+.motor-technical-card { margin: 0 0 18px; padding: 14px; border: 1px solid #cfe0ef; border-radius: 14px; background: #f6faff; }
+.motor-technical-card h3 { margin: 0 0 12px; color: #173c61; }
+.motor-technical-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; }
+.motor-technical-grid > div { padding: 9px 10px; border-radius: 10px; background: #fff; border: 1px solid #dfe9f2; }
+.motor-technical-grid dt { font-size: .72rem; text-transform: uppercase; font-weight: 800; color: #60788d; }
+.motor-technical-grid dd { margin: 3px 0 0; font-weight: 750; color: #173c61; overflow-wrap: anywhere; }
+.component-raw-details { margin: 0 0 18px; border: 1px solid #dbe5ef; border-radius: 12px; background: #fafcfe; }
+.component-raw-details summary { cursor: pointer; padding: 11px 13px; font-weight: 800; color: #31506d; }
+.component-raw-details p { margin: 0; padding: 0 13px 13px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; color: #465c70; }
+.modal-header, .viewer-navigation { flex: 0 0 auto; }
+.viewer-image-wrapper { margin: 0; }
+@media (max-width: 760px) { .motor-technical-grid { grid-template-columns: 1fr; } }

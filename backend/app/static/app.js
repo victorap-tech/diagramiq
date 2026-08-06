@@ -1901,6 +1901,51 @@ function formatAssetKind(kind) {
     return ({datasheet:'Datasheet', manual:'Manual', plano:'Plano del componente', foto:'Fotografía', otro:'Otro documento'})[kind] || kind || 'Documento';
 }
 
+function extractMotorTechnicalData(component = {}, sourceItem = {}) {
+    const raw = String(component.description || sourceItem.description || '').replace(/\s+/g, ' ').trim();
+    const reference = String(sourceItem.display_reference || sourceItem.reference || component.reference || '').trim();
+    const refIndex = reference ? raw.toUpperCase().indexOf(reference.toUpperCase()) : -1;
+    const context = refIndex >= 0
+        ? raw.slice(Math.max(0, refIndex - 90), Math.min(raw.length, refIndex + 360))
+        : raw;
+    const find = (regex, group = 1) => {
+        const match = context.match(regex) || raw.match(regex);
+        return match ? String(match[group] || match[0]).trim() : '';
+    };
+    const power = find(/\b(\d+(?:[.,]\d+)?\s*(?:CV|HP|kW))\b/i);
+    const voltage = find(/\b(\d+(?:[.,]\d+)?\s*V(?:\s*(?:CA|AC|CC|DC))?)\b/i);
+    const current = find(/\b(\d+(?:[.,]\d+)?\s*A)\b/i);
+    const speed = find(/\b(\d{2,5}\s*RPM)\b/i);
+    const poles = find(/\b((?:II|III|IV|V|VI|VII|VIII|IX|X|\d+)\s*POLOS?)\b/i);
+    const cable = find(/\b(\d+\s*[xX]\s*\d+(?:[.,]\d+)?\s*mm(?:²|2))\b/i);
+    let functionText = '';
+    const functionMatch = context.match(/(?:RPM|POLOS?)\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9 _./-]{4,90}?)(?=\s+(?:\d+\s*M\b|\d+\s*[xX]\s*\d|-[A-Z0-9_]+|PE\b))/i);
+    if (functionMatch) functionText = functionMatch[1].replace(/\s+/g, ' ').trim();
+    return { raw, reference, power, voltage, current, speed, poles, cable, functionText };
+}
+
+function motorTechnicalMarkup(component = {}, sourceItem = {}) {
+    const data = extractMotorTechnicalData(component, sourceItem);
+    const rows = [
+        ['Equipo', data.reference],
+        ['Tipo', 'Motor eléctrico'],
+        ['Potencia', data.power],
+        ['Tensión', data.voltage],
+        ['Corriente', data.current],
+        ['Velocidad', data.speed],
+        ['Polos', data.poles],
+        ['Cable', data.cable],
+        ['Función', data.functionText],
+    ].filter(([, value]) => value);
+    if (!rows.length) return '';
+    return `<section class="motor-technical-card">
+        <h3>Datos técnicos del motor</h3>
+        <dl class="motor-technical-grid">
+            ${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
+        </dl>
+    </section>`;
+}
+
 function componentSheetMarkup(payload, sourceItem = {}) {
     const c = payload.component || {};
     const assets = payload.assets || [];
@@ -1919,7 +1964,11 @@ function componentSheetMarkup(payload, sourceItem = {}) {
                     <div><dt>Ubicación</dt><dd>${escapeHtml([c.organization,c.plant,c.sector].filter(Boolean).join(' · ') || 'Sin ubicación')}</dd></div>
                     <div><dt>Plano</dt><dd>${escapeHtml(c.document_title || '')}${c.page_number ? ` · página ${c.page_number}` : ''}</dd></div>
                 </dl>
-                <div class="component-description"><h3>Descripción técnica</h3><p>${escapeHtml(c.description || 'Todavía no hay una descripción técnica consolidada para este componente.')}</p></div>
+                ${String(c.type || sourceItem.component_type || '').toLowerCase().includes('motor') ? motorTechnicalMarkup(c, sourceItem) : ''}
+                <details class="component-raw-details">
+                    <summary>${String(c.type || sourceItem.component_type || '').toLowerCase().includes('motor') ? 'Texto original del plano' : 'Descripción técnica'}</summary>
+                    <p>${escapeHtml(c.description || 'Todavía no hay una descripción técnica consolidada para este componente.')}</p>
+                </details>
                 ${sourceItem.channel_reference ? `
                     <div class="component-location-actions">
                         ${(sourceItem.module_occurrences || []).length ? `<button type="button" class="secondary-button" data-sheet-open-module>Ver módulo físico (${sourceItem.module_page_count || 1} pág.)</button>` : '<span class="muted-text">Ubicación física del módulo pendiente de confirmar.</span>'}
