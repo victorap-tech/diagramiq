@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.11.6"
+        href="/static/styles.css?v=0.12.0"
     >
 </head>
 
@@ -179,7 +179,7 @@
                 <div>
                     <span class="section-label">Biblioteca técnica</span>
                     <h2>Componentes</h2>
-                    <p>Catálogo generado desde las listas y planos. Abrí la ficha de cada componente para consultar su descripción y asociar datasheets, manuales, planos o fotografías.</p>
+                    <p>Biblioteca de equipos físicos consolidada. Las señales, canales PLC y referencias de plano se consultan desde Buscar.</p>
                 </div>
                 <div class="section-actions"><button id="exportComponentsButton" class="primary-button" type="button">Exportar a Excel</button><button id="refreshComponentsButton" class="secondary-button" type="button">Actualizar</button></div>
             </div>
@@ -189,7 +189,8 @@
                     <div class="form-group"><label for="componentPlant">Planta</label><select id="componentPlant" disabled><option value="">Todas</option></select></div>
                     <div class="form-group"><label for="componentSector">Sector</label><select id="componentSector" disabled><option value="">Todos</option></select></div>
                     <div class="form-group"><label for="componentType">Tipo</label><select id="componentType"><option value="">Todos</option></select></div>
-                    <div class="form-group component-query"><label for="componentQuery">Referencia o modelo</label><input id="componentQuery" type="search" placeholder="Ej.: QF12, KM3, FC301"></div>
+                    <div class="form-group component-query"><label for="componentQuery">Equipo, referencia o modelo</label><input id="componentQuery" type="search" placeholder="Ej.: QF12, KM3, 3RV2011"></div>
+                    <div class="form-group component-incomplete-toggle"><label class="checkbox-label"><input id="componentIncludeIncomplete" type="checkbox"> Mostrar fichas incompletas</label><small>Incluye equipos sin modelo confirmado.</small></div>
                 </div>
                 <div id="componentSummary" class="component-summary"></div>
                 <div id="componentsMessage" class="message hidden"></div>
@@ -746,7 +747,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.11.6</span>
+        <span>DiagramIQ v0.12.0</span>
 
         <a
             href="/docs"
@@ -757,6 +758,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.11.6"></script>
+    <script src="/static/app.js?v=0.12.0"></script>
 </body>
 </html>

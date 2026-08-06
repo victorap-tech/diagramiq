@@ -1312,3 +1312,13 @@ textarea {
 .component-location-actions .secondary-button {
     flex: 1 1 220px;
 }
+
+
+/* v0.12.0 — Biblioteca de equipos físicos */
+.component-incomplete-toggle { align-self: end; }
+.checkbox-label { display:flex; gap:.55rem; align-items:center; font-weight:700; }
+.checkbox-label input { width:auto; }
+.quality-badge { display:inline-flex; margin-top:.55rem; padding:.22rem .55rem; border-radius:999px; font-size:.76rem; font-weight:800; }
+.quality-complete { background:#e8f7ee; color:#17653a; }
+.quality-review { background:#fff4d9; color:#825c00; }
+.component-sheet-async-status { position:absolute; right:1.25rem; top:1rem; font-size:.82rem; color:#667085; }

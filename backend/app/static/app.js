@@ -84,6 +84,7 @@ const elements = {
     componentSector: document.getElementById("componentSector"),
     componentType: document.getElementById("componentType"),
     componentQuery: document.getElementById("componentQuery"),
+    componentIncludeIncomplete: document.getElementById("componentIncludeIncomplete"),
     componentSummary: document.getElementById("componentSummary"),
     componentsMessage: document.getElementById("componentsMessage"),
     componentsLoading: document.getElementById("componentsLoading"),
@@ -1846,7 +1847,7 @@ function renderComponentCatalog(items) {
                 ${item.manufacturer ? `<strong>${escapeHtml(item.manufacturer)}</strong><br>` : ''}
                 ${item.model ? `Modelo: ${escapeHtml(item.model)}<br>` : '<span class="muted">Modelo pendiente de confirmar</span><br>'}
                 ${escapeHtml(item.organization_name || '')}${item.plant_name ? ` · ${escapeHtml(item.plant_name)}` : ''}${item.sector_name ? ` · ${escapeHtml(item.sector_name)}` : ''}<br>
-                ${item.occurrence_count ? `${item.occurrence_count} apariciones · ${item.page_count || 0} páginas` : ''}
+                ${item.model ? '<span class="quality-badge quality-complete">Ficha completa</span>' : '<span class="quality-badge quality-review">Revisar</span>'}
             </p>
             <div class="component-catalog-actions">
                 <button type="button" class="primary-button" data-open-component-sheet="${index}">Abrir ficha</button>
@@ -1919,7 +1920,17 @@ async function openComponentSheet(item) {
     const dialog = document.createElement('dialog');
     dialog.id = 'componentSheetDialog';
     dialog.className = 'relations-dialog component-sheet-dialog';
-    dialog.innerHTML = `<div class="relations-dialog-body"><div class="loading-state">Cargando ficha técnica…</div></div>`;
+    const instantPayload = {
+        component: {
+            id: item.id, reference: item.reference, type: item.component_type,
+            manufacturer: item.manufacturer, model: item.model, description: item.description,
+            document_id: item.document_id, document_title: item.document_title,
+            page_number: item.page_number, organization: item.organization_name,
+            plant: item.plant_name, sector: item.sector_name
+        },
+        assets: [], occurrence_summary: null
+    };
+    dialog.innerHTML = `<div class="relations-dialog-body">${componentSheetMarkup(instantPayload, item)}<div class="component-sheet-async-status">Cargando documentación asociada…</div></div>`;
     document.body.appendChild(dialog);
     dialog.addEventListener('click', (event) => event.stopPropagation());
     dialog.addEventListener('close', () => {
@@ -1927,6 +1938,13 @@ async function openComponentSheet(item) {
         dialog.remove();
     });
     dialog.showModal();
+    dialog.querySelector('[data-close-component-sheet]')?.addEventListener('click', () => {
+        dialog.dataset.reopenAfterViewer = '0';
+        dialog.close();
+    });
+    dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'component'));
+    dialog.querySelector('[data-sheet-open-module]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'component'));
+    dialog.querySelector('[data-sheet-open-channel]')?.addEventListener('click', () => openViewerFromComponentSheet(dialog, item, 'channel'));
 
     const load = async () => {
         const payload = await apiRequest(API.componentLibrary(item.id));
@@ -2072,6 +2090,7 @@ function componentCatalogParams() {
     if (sectorId) params.set("sector_id", sectorId);
     if (componentType) params.set("component_type", componentType);
     if (query) params.set("q", query);
+    if (elements.componentIncludeIncomplete?.checked) params.set("include_incomplete", "true");
     params.set("limit", "500");
     return params;
 }
@@ -2103,6 +2122,7 @@ function initializeComponentCatalogEvents() {
     elements.componentOrganization?.addEventListener('change', loadComponentPlants);
     elements.componentPlant?.addEventListener('change', loadComponentSectors);
     elements.componentSector?.addEventListener('change', loadComponentCatalog);
+    elements.componentIncludeIncomplete?.addEventListener('change', loadComponentCatalog);
     elements.componentType?.addEventListener('change', loadComponentCatalog);
     elements.refreshComponentsButton?.addEventListener('click', loadComponentCatalog);
     elements.exportComponentsButton?.addEventListener('click', exportComponentCatalog);

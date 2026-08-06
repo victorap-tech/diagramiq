@@ -156,3 +156,11 @@ Archivos principales modificados:
 - Devuelve el código HTTP y el detalle real cuando Anthropic rechaza la consulta.
 - Registra en Railway el modelo, intento, stop_reason y tipos de bloque sin exponer la API key.
 - Mantiene intacta la navegación PLC y la biblioteca de la v0.11.5.
+
+
+## v0.12.0 — Biblioteca de equipos físicos
+- Componentes muestra por defecto solo equipos físicos con modelo confirmado.
+- Canales PLC, potenciales y señales permanecen en Buscar.
+- Opción Mostrar fichas incompletas.
+- Apertura inmediata de fichas y carga diferida de documentación.
+- Consulta de apariciones optimizada para no recorrer todo el PDF al abrir una ficha.

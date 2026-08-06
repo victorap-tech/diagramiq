@@ -73,13 +73,19 @@ def component_library(reference_id: int, db: Session = Depends(get_db)):
     )
     occurrence_rows = []
     if document and sector:
+        target = normalize_term(ref.reference)
         related = (
             db.query(models.ComponentReference, models.DocumentPage)
             .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
             .filter(models.DocumentPage.document_id == document.id)
+            .filter(
+                (models.ComponentReference.normalized_reference == target)
+                | (models.ComponentReference.reference == ref.reference)
+            )
+            .order_by(models.DocumentPage.page_number.asc(), models.ComponentReference.id.asc())
+            .limit(1000)
             .all()
         )
-        target = normalize_term(ref.reference)
         for related_ref, related_page in related:
             if normalize_term(related_ref.reference) != target:
                 continue

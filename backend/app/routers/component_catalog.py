@@ -541,6 +541,32 @@ def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str,
     }
 
 
+PHYSICAL_LIBRARY_TYPES = {
+    "guardamotor", "contactor", "interruptor", "seccionador", "relé", "relé térmico",
+    "fusible", "variador", "PLC", "módulo PLC", "módulo de entradas",
+    "módulo de salidas", "módulo analógico", "motor", "sensor", "válvula",
+    "fuente", "transformador", "bornera", "pulsador", "piloto",
+}
+
+CHANNEL_OR_SUBELEMENT_RE = re.compile(
+    r"^(?:AI|AO|DI|DO|DQ|IQ|Q|I|IW|QW|IB|QB|ID|QD)\d+(?:[_.]\d+)?$",
+    re.IGNORECASE,
+)
+
+def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False) -> bool:
+    """Deja en Biblioteca solo equipos físicos; señales y canales quedan en Buscar."""
+    reference = (item.get("reference") or "").strip()
+    if is_nonphysical_reference(reference) or CHANNEL_OR_SUBELEMENT_RE.fullmatch(reference):
+        return False
+    model = (item.get("model") or "").strip()
+    component_type = (item.get("component_type") or "").strip()
+    reliable = _is_reliable_model(model)
+    physical_type = component_type in PHYSICAL_LIBRARY_TYPES
+    if include_incomplete:
+        return reliable or physical_type
+    return reliable and physical_type
+
+
 def _filtered_items(
     db: Session,
     organization_id: int | None,
@@ -601,11 +627,13 @@ def list_components(
     component_type: str | None = Query(default=None),
     q: str | None = Query(default=None),
     limit: int = Query(default=500, ge=1, le=2000),
+    include_incomplete: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     raw_items = _filtered_items(
         db, organization_id, plant_id, sector_id, component_type, q, hard_limit=10000
     )
+    raw_items = [item for item in raw_items if is_library_equipment(item, include_incomplete)]
 
     # Consolida apariciones repetidas: una ficha por referencia real, documento y sector.
     # Las menciones en listas, contactos auxiliares y referencias cruzadas quedan agrupadas.
