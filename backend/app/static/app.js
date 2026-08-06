@@ -436,44 +436,40 @@ async function checkApiStatus() {
 
 async function loadOrganizations() {
     try {
+        const previousSearchOrganization = elements.searchOrganization?.value || state.search.organizationId;
+        const previousUploadOrganization = elements.uploadOrganization?.value || state.upload.organizationId;
         const response = await apiRequest(API.organizations);
         state.organizations = toArray(response);
         renderOrganizations();
 
-        fillSelect(
-            elements.searchOrganization,
-            state.organizations,
-            "Seleccionar empresa"
-        );
+        fillSelect(elements.searchOrganization, state.organizations, "Seleccionar empresa");
+        fillSelect(elements.uploadOrganization, state.organizations, "Seleccionar empresa");
 
-        fillSelect(
-            elements.uploadOrganization,
-            state.organizations,
-            "Seleccionar empresa"
-        );
+        const validIds = new Set(state.organizations.map((item) => String(getObjectId(item))));
+        const searchOrganizationId = validIds.has(String(previousSearchOrganization || ""))
+            ? String(previousSearchOrganization)
+            : (state.organizations.length === 1 ? String(getObjectId(state.organizations[0])) : "");
+        const uploadOrganizationId = validIds.has(String(previousUploadOrganization || ""))
+            ? String(previousUploadOrganization)
+            : (state.organizations.length === 1 ? String(getObjectId(state.organizations[0])) : "");
+
+        if (elements.searchOrganization) elements.searchOrganization.value = searchOrganizationId;
+        if (elements.uploadOrganization) elements.uploadOrganization.value = uploadOrganizationId;
 
         resetSelect(elements.searchPlant, "Seleccionar planta");
         resetSelect(elements.searchSector, "Seleccionar sector");
         resetSelect(elements.uploadPlant, "Seleccionar planta");
         resetSelect(elements.uploadSector, "Seleccionar sector");
+
+        if (searchOrganizationId) await loadSearchPlants(searchOrganizationId, true);
+        if (uploadOrganizationId) await loadUploadPlants(uploadOrganizationId, true);
         syncComponentOrganizations();
     } catch (error) {
         console.error("Error cargando organizaciones:", error);
-
-        showMessage(
-            elements.searchMessage,
-            `No se pudieron cargar las empresas: ${error.message}`,
-            "error"
-        );
-
-        showMessage(
-            elements.uploadMessage,
-            `No se pudieron cargar las empresas: ${error.message}`,
-            "error"
-        );
+        showMessage(elements.searchMessage, `No se pudieron cargar las empresas: ${error.message}`, "error");
+        showMessage(elements.uploadMessage, `No se pudieron cargar las empresas: ${error.message}`, "error");
     }
 }
-
 
 
 function renderOrganizations() {
@@ -680,7 +676,7 @@ async function fetchSectorsByPlant(plantId) {
 }
 
 
-async function loadSearchPlants(organizationId) {
+async function loadSearchPlants(organizationId, autoSelect = false) {
     resetSelect(elements.searchPlant, "Cargando plantas...");
     resetSelect(elements.searchSector, "Seleccionar sector");
 
@@ -702,6 +698,12 @@ async function loadSearchPlants(organizationId) {
             plants,
             plants.length ? "Seleccionar planta" : "No hay plantas"
         );
+
+        if (autoSelect && plants.length === 1) {
+            const plantId = String(getObjectId(plants[0]));
+            elements.searchPlant.value = plantId;
+            await loadSearchSectors(plantId, true);
+        }
     } catch (error) {
         resetSelect(elements.searchPlant, "Error al cargar plantas");
 
@@ -714,7 +716,7 @@ async function loadSearchPlants(organizationId) {
 }
 
 
-async function loadUploadPlants(organizationId) {
+async function loadUploadPlants(organizationId, autoSelect = false) {
     resetSelect(elements.uploadPlant, "Cargando plantas...");
     resetSelect(elements.uploadSector, "Seleccionar sector");
 
@@ -736,6 +738,12 @@ async function loadUploadPlants(organizationId) {
             plants,
             plants.length ? "Seleccionar planta" : "No hay plantas"
         );
+
+        if (autoSelect && plants.length === 1) {
+            const plantId = String(getObjectId(plants[0]));
+            elements.uploadPlant.value = plantId;
+            await loadUploadSectors(plantId, true);
+        }
     } catch (error) {
         resetSelect(elements.uploadPlant, "Error al cargar plantas");
 
@@ -748,7 +756,7 @@ async function loadUploadPlants(organizationId) {
 }
 
 
-async function loadSearchSectors(plantId) {
+async function loadSearchSectors(plantId, autoSelect = false) {
     resetSelect(elements.searchSector, "Cargando sectores...");
 
     state.search.plantId = normalizeId(plantId);
@@ -768,6 +776,12 @@ async function loadSearchSectors(plantId) {
             sectors,
             sectors.length ? "Seleccionar sector" : "No hay sectores"
         );
+
+        if (autoSelect && sectors.length === 1) {
+            const sectorId = String(getObjectId(sectors[0]));
+            elements.searchSector.value = sectorId;
+            state.search.sectorId = normalizeId(sectorId);
+        }
     } catch (error) {
         resetSelect(elements.searchSector, "Error al cargar sectores");
 
@@ -780,7 +794,7 @@ async function loadSearchSectors(plantId) {
 }
 
 
-async function loadUploadSectors(plantId) {
+async function loadUploadSectors(plantId, autoSelect = false) {
     resetSelect(elements.uploadSector, "Cargando sectores...");
 
     state.upload.plantId = normalizeId(plantId);
@@ -800,6 +814,12 @@ async function loadUploadSectors(plantId) {
             sectors,
             sectors.length ? "Seleccionar sector" : "No hay sectores"
         );
+
+        if (autoSelect && sectors.length === 1) {
+            const sectorId = String(getObjectId(sectors[0]));
+            elements.uploadSector.value = sectorId;
+            state.upload.sectorId = normalizeId(sectorId);
+        }
     } catch (error) {
         resetSelect(elements.uploadSector, "Error al cargar sectores");
 
@@ -3119,6 +3139,7 @@ async function syncDocumentsBucket() {
         const result = await apiRequest(API.syncDocumentsBucket, { method: "POST" });
         showMessage(elements.documentsMessage, result?.message || `Bucket conectado: ${statusResult.documents_found || 0} PDF encontrados. No se inició ninguna indexación.`, "success");
         await loadDocuments();
+        await loadOrganizations();
     } catch (error) {
         showMessage(elements.documentsMessage, `No se pudo sincronizar el Bucket: ${error.message}`, "error");
     } finally {

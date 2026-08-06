@@ -488,6 +488,45 @@ def _safe_name(value: object, fallback: str) -> str:
     return text[:150] if text else fallback
 
 
+def _manifest_hierarchy(manifest: dict | None) -> tuple[str | None, str | None, str | None]:
+    manifest = manifest or {}
+    organization_data = manifest.get("organization") if isinstance(manifest.get("organization"), dict) else {}
+    plant_data = manifest.get("plant") if isinstance(manifest.get("plant"), dict) else {}
+    sector_data = manifest.get("sector") if isinstance(manifest.get("sector"), dict) else {}
+    return (
+        str(organization_data.get("name") or "").strip() or None,
+        str(plant_data.get("name") or "").strip() or None,
+        str(sector_data.get("name") or "").strip() or None,
+    )
+
+
+def _update_manifest_hierarchy(
+    object_key: str,
+    document: models.Document,
+) -> None:
+    """Persiste nombres estables para reconstruir la jerarquía en otra BD."""
+    sector = document.sector
+    plant = sector.plant if sector else None
+    organization = plant.organization if plant else None
+    if not (sector and plant and organization):
+        return
+    manifest_key = object_key.rsplit(".", 1)[0] + ".json"
+    current = get_json(manifest_key) or {}
+    current.update({
+        "schema_version": 2,
+        "title": document.title,
+        "filename": document.filename,
+        "content_hash": document.content_hash,
+        "description": document.description,
+        "document_type": document.document_type,
+        "page_count": document.page_count,
+        "organization": {"id": organization.id, "name": organization.name},
+        "plant": {"id": plant.id, "name": plant.name},
+        "sector": {"id": sector.id, "name": sector.name},
+    })
+    put_json(manifest_key, current)
+
+
 def _recover_hierarchy(
     db: Session,
     organization_id: int,
@@ -495,49 +534,52 @@ def _recover_hierarchy(
     sector_id: int,
     manifest: dict | None,
 ) -> models.Sector:
-    """Recupera o crea la jerarquía necesaria para registrar un PDF del Bucket."""
-    manifest = manifest or {}
-    organization_data = manifest.get("organization") if isinstance(manifest.get("organization"), dict) else {}
-    plant_data = manifest.get("plant") if isinstance(manifest.get("plant"), dict) else {}
-    sector_data = manifest.get("sector") if isinstance(manifest.get("sector"), dict) else {}
+    """Recupera la jerarquía por nombre y la guarda permanentemente.
 
-    organization = db.query(models.Organization).filter(models.Organization.id == organization_id).first()
+    Los IDs incrustados en la ruta del Bucket pertenecen a una BD anterior y
+    no son confiables en PostgreSQL nuevo. Los nombres del manifiesto son la
+    identidad estable; los IDs solo se usan como respaldo para archivos viejos.
+    """
+    organization_name, plant_name, sector_name = _manifest_hierarchy(manifest)
+    organization_name = _safe_name(organization_name, f"Empresa recuperada (bucket {organization_id})")
+    plant_name = _safe_name(plant_name, f"Planta recuperada (bucket {plant_id})")
+    sector_name = _safe_name(sector_name, f"Sector recuperado (bucket {sector_id})")
+
+    organization = (
+        db.query(models.Organization)
+        .filter(func.lower(models.Organization.name) == organization_name.lower())
+        .first()
+    )
     if organization is None:
-        organization_name = _safe_name(
-            organization_data.get("name"),
-            f"Empresa recuperada (bucket {organization_id})",
-        )
-        organization = db.query(models.Organization).filter(func.lower(models.Organization.name) == organization_name.lower()).first()
-        if organization is None:
-            organization = models.Organization(name=organization_name)
-            db.add(organization)
-            db.flush()
+        organization = models.Organization(name=organization_name)
+        db.add(organization)
+        db.flush()
 
-    plant = db.query(models.Plant).filter(models.Plant.id == plant_id).first()
+    plant = (
+        db.query(models.Plant)
+        .filter(
+            models.Plant.organization_id == organization.id,
+            func.lower(models.Plant.name) == plant_name.lower(),
+        )
+        .first()
+    )
     if plant is None:
-        plant_name = _safe_name(plant_data.get("name"), f"Planta recuperada (bucket {plant_id})")
-        plant = (
-            db.query(models.Plant)
-            .filter(models.Plant.organization_id == organization.id, func.lower(models.Plant.name) == plant_name.lower())
-            .first()
-        )
-        if plant is None:
-            plant = models.Plant(name=plant_name, organization_id=organization.id)
-            db.add(plant)
-            db.flush()
+        plant = models.Plant(name=plant_name, organization_id=organization.id)
+        db.add(plant)
+        db.flush()
 
-    sector = db.query(models.Sector).filter(models.Sector.id == sector_id).first()
-    if sector is None:
-        sector_name = _safe_name(sector_data.get("name"), f"Sector recuperado (bucket {sector_id})")
-        sector = (
-            db.query(models.Sector)
-            .filter(models.Sector.plant_id == plant.id, func.lower(models.Sector.name) == sector_name.lower())
-            .first()
+    sector = (
+        db.query(models.Sector)
+        .filter(
+            models.Sector.plant_id == plant.id,
+            func.lower(models.Sector.name) == sector_name.lower(),
         )
-        if sector is None:
-            sector = models.Sector(name=sector_name, plant_id=plant.id)
-            db.add(sector)
-            db.flush()
+        .first()
+    )
+    if sector is None:
+        sector = models.Sector(name=sector_name, plant_id=plant.id)
+        db.add(sector)
+        db.flush()
     return sector
 
 
@@ -618,22 +660,40 @@ def sync_documents_from_bucket(
             .order_by(models.Document.id.asc())
             .first()
         )
+        manifest_key = key.rsplit(".", 1)[0] + ".json"
+        manifest = get_json(manifest_key) or {}
+
         if existing is not None:
             already_registered += 1
+            try:
+                recovered_sector = _recover_hierarchy(
+                    db,
+                    int(values["organization_id"]),
+                    int(values["plant_id"]),
+                    int(values["sector_id"]),
+                    manifest,
+                )
+                if existing.sector_id != recovered_sector.id:
+                    existing.sector_id = recovered_sector.id
+                # Completa metadatos antiguos cuando ahora existe manifiesto.
+                if manifest.get("title"):
+                    existing.title = _safe_name(manifest.get("title"), existing.title)
+                if manifest.get("filename"):
+                    existing.filename = _safe_name(manifest.get("filename"), existing.filename)
+                db.flush()
+                _update_manifest_hierarchy(key, existing)
+            except Exception as exc:
+                logger.warning("No se pudo reparar la jerarquía de %s: %s", key, exc)
             # Si el PDF existe pero el índice no, lo deja disponible sin procesarlo.
-            # Nunca se inicia una indexación desde el botón Actualizar.
             if not existing.pages and str(existing.processing_status or "").lower() != "processing":
                 existing.processing_status = "uploaded"
                 existing.processing_stage = "index_missing"
                 existing.processing_progress = 0
                 existing.processed_pages = 0
                 existing.processing_message = "PDF recuperado; índice faltante. Procesar manualmente"
-                db.commit()
                 index_missing += 1
+            db.commit()
             continue
-
-        manifest_key = key.rsplit(".", 1)[0] + ".json"
-        manifest = get_json(manifest_key) or {}
         try:
             sector = _recover_hierarchy(
                 db,
@@ -682,6 +742,9 @@ def sync_documents_from_bucket(
         "queued_for_indexing": 0,
         "index_missing": index_missing,
         "ignored": ignored,
+        "organizations": db.query(models.Organization).count(),
+        "plants": db.query(models.Plant).count(),
+        "sectors": db.query(models.Sector).count(),
         "message": (
             f"Bucket sincronizado: {found} PDF encontrados, "
             f"{already_registered} ya registrados y {recovered} recuperados. "

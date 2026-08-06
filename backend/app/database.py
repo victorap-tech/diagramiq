@@ -10,6 +10,13 @@ DATABASE_URL = os.getenv(
     "sqlite:///./diagramiq.db",
 )
 
+# Railway puede entregar postgresql://. Forzamos el controlador Psycopg 3
+# incluido en requirements para no depender de psycopg2 del sistema.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+
 
 connect_args = {}
 engine_kwargs = {
