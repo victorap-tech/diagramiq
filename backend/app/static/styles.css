@@ -1301,3 +1301,14 @@ textarea {
 .component-asset-form input,.component-asset-form select { width:100%; }
 .muted-text { color:#607080; }
 @media (max-width:760px) { .component-sheet-grid { grid-template-columns:1fr; } .component-sheet-data { grid-template-columns:1fr; } }
+
+/* v0.11.4: separa ubicación física del módulo y apariciones del canal PLC */
+.component-location-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+.component-location-actions .secondary-button {
+    flex: 1 1 220px;
+}

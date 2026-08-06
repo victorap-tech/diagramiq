@@ -75,41 +75,165 @@ PLC_CHANNEL_RE = re.compile(
 def is_plc_channel(value: str | None) -> bool:
     return bool(PLC_CHANNEL_RE.fullmatch((value or "").strip()))
 
-def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: str) -> bool:
-    """Convierte una coincidencia del módulo en una ubicación exacta de canal PLC.
+def _term_location_payload(term: models.PageSearchTerm, page: models.DocumentPage, document: models.Document) -> dict[str, Any]:
+    return {
+        "document_id": document.id,
+        "document_title": document.title,
+        "page_id": page.id,
+        "page_number": page.page_number,
+        "x": term.x,
+        "y": term.y,
+        "width": term.width,
+        "height": term.height,
+        "display_text": term.display_text or term.term or "",
+        "row_text": term.row_text or "",
+    }
 
-    La ficha sigue vinculada al componente físico, pero la referencia visible y el
-    resaltado corresponden a la dirección buscada (por ejemplo Q5050.0).
-    """
+
+def _reference_location_payload(ref: models.ComponentReference, page: models.DocumentPage, document: models.Document) -> dict[str, Any]:
+    return {
+        "reference_id": ref.id,
+        "document_id": document.id,
+        "document_title": document.title,
+        "page_id": page.id,
+        "page_number": page.page_number,
+        "x": ref.x,
+        "y": ref.y,
+        "width": ref.width,
+        "height": ref.height,
+        "display_text": ref.reference or "",
+        "row_text": ref.row_text or ref.description or "",
+        "model": ref.model or "",
+        "source_kind": ref.source_kind or "",
+        "page_type": page.page_type or "",
+    }
+
+
+def _plc_channel_occurrences(db: Session, item: dict[str, Any], query_value: str) -> list[dict[str, Any]]:
+    """Todas las apariciones exactas del canal dentro del documento del módulo."""
     wanted = normalize_term(query_value)
-    if not wanted or not item.get("page_id"):
-        return False
-    terms = (
-        db.query(models.PageSearchTerm)
-        .filter(models.PageSearchTerm.document_page_id == item["page_id"])
+    document_id = item.get("document_id")
+    if not wanted or not document_id:
+        return []
+    rows = (
+        db.query(models.PageSearchTerm, models.DocumentPage, models.Document)
+        .join(models.DocumentPage, models.PageSearchTerm.document_page_id == models.DocumentPage.id)
+        .join(models.Document, models.DocumentPage.document_id == models.Document.id)
+        .filter(models.Document.id == document_id)
         .all()
     )
-    exact = None
-    for term in terms:
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for term, page, document in rows:
         candidates = (getattr(term, "term", None), getattr(term, "display_text", None))
-        if any(normalize_term(candidate) == wanted for candidate in candidates):
-            exact = term
-            break
-    if exact is None:
+        if not any(normalize_term(candidate) == wanted for candidate in candidates):
+            continue
+        key = (page.id, term.x, term.y, term.width, term.height)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(_term_location_payload(term, page, document))
+    return sorted(found, key=lambda row: (row["page_number"], row.get("y") or 0, row.get("x") or 0))
+
+
+def _module_occurrence_score(row: dict[str, Any], reference: str, model: str) -> tuple[int, int, int, int]:
+    text = f"{row.get('row_text') or ''} {row.get('display_text') or ''}".upper()
+    page_type = (row.get("page_type") or "").lower()
+    source = (row.get("source_kind") or "").lower()
+    score = 0
+    if model and normalize_term(model) in normalize_term(text):
+        score += 8
+    if reference and normalize_term(reference) in normalize_term(text):
+        score += 5
+    if source in {"schematic", "plan", "catalog+plan"}:
+        score += 3
+    if page_type in {"schematic", "plan", "electrical", "diagram"}:
+        score += 3
+    if row.get("x") is not None and row.get("y") is not None:
+        score += 2
+    # Las tablas de asignación de direcciones son útiles para el canal, pero no
+    # deben ser la ubicación física principal del módulo.
+    if any(token in text for token in ("DIRECCIÓN", "DIRECTION", "ADRESSE", "DIGITALES-AUSGANGSMODUL", "DIGITALES-EINGANGSMODUL")):
+        score -= 5
+    return (score, 1 if model and normalize_term(model) in normalize_term(text) else 0, 1 if row.get("x") is not None else 0, -(row.get("page_number") or 0))
+
+
+def _plc_module_occurrences(db: Session, item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ubicaciones candidatas del hardware físico del módulo, separadas del canal."""
+    document_id = item.get("document_id")
+    reference = (item.get("reference") or item.get("parent_reference") or "").strip()
+    model = (item.get("model") or "").strip()
+    if not document_id:
+        return []
+    rows = (
+        db.query(models.ComponentReference, models.DocumentPage, models.Document)
+        .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
+        .join(models.Document, models.DocumentPage.document_id == models.Document.id)
+        .filter(models.Document.id == document_id)
+        .all()
+    )
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    ref_norm = normalize_term(reference)
+    model_norm = normalize_term(model)
+    for ref, page, document in rows:
+        ref_model = _best_model_from_page(ref.reference or "", page.text_content or "", ref.model)
+        same_reference = bool(ref_norm and normalize_term(ref.reference) == ref_norm)
+        same_model = bool(model_norm and normalize_term(ref_model) == model_norm)
+        # Una ubicación de módulo debe corresponder al mismo identificador o al
+        # mismo modelo físico; no alcanza con que el texto mencione el canal.
+        if not (same_reference or same_model):
+            continue
+        payload = _reference_location_payload(ref, page, document)
+        payload["model"] = ref_model or model
+        key = (page.id, ref.x, ref.y, normalize_term(ref.reference), normalize_term(ref_model))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(payload)
+    candidates.sort(key=lambda row: _module_occurrence_score(row, reference, model), reverse=True)
+    return candidates
+
+
+def _attach_plc_channel_target(db: Session, item: dict[str, Any], query_value: str) -> bool:
+    """Vincula canal y módulo sin confundir sus ubicaciones.
+
+    La tarjeta representa el canal consultado, pero conserva dos conjuntos de
+    ubicaciones: las apariciones exactas del canal y las del hardware físico.
+    """
+    channel_occurrences = _plc_channel_occurrences(db, item, query_value)
+    if not channel_occurrences:
         return False
+    module_occurrences = _plc_module_occurrences(db, item)
 
     parent = item.get("reference") or "módulo"
-    channel = (getattr(exact, "display_text", None) or query_value).strip().upper()
+    channel = query_value.strip().upper()
+    channel_primary = channel_occurrences[0]
+    module_primary = module_occurrences[0] if module_occurrences else None
+
     item["parent_reference"] = parent
     item["channel_reference"] = channel
     item["display_reference"] = channel
     item["component_type"] = "canal PLC"
     item["match_rank"] = 0
     item["match_reason"] = f"Canal exacto del módulo {parent}"
-    item["x"] = exact.x
-    item["y"] = exact.y
-    item["width"] = exact.width
-    item["height"] = exact.height
+    item["channel_occurrences"] = channel_occurrences
+    item["module_occurrences"] = module_occurrences
+    item["channel_page_count"] = len({row["page_number"] for row in channel_occurrences})
+    item["module_page_count"] = len({row["page_number"] for row in module_occurrences})
+
+    # La ubicación principal de la ficha es la del módulo físico si se pudo
+    # determinar; la del canal queda separada y se abre con su propio botón.
+    primary = module_primary or channel_primary
+    for field in ("document_id", "document_title", "page_id", "page_number", "x", "y", "width", "height"):
+        item[field] = primary.get(field)
+    item["channel_document_id"] = channel_primary.get("document_id")
+    item["channel_page_id"] = channel_primary.get("page_id")
+    item["channel_page_number"] = channel_primary.get("page_number")
+    item["channel_x"] = channel_primary.get("x")
+    item["channel_y"] = channel_primary.get("y")
+    item["channel_width"] = channel_primary.get("width")
+    item["channel_height"] = channel_primary.get("height")
     item["description"] = (
         f"Canal {channel} perteneciente al módulo {parent}. "
         + (item.get("description") or "")

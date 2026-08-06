@@ -1765,38 +1765,54 @@ function renderComponentSummary(counts) {
     }));
 }
 
-function componentViewerResult(item) {
-    const reference = item.channel_reference || item.display_reference || item.reference || item.model || '';
+function componentViewerResult(item, location = null, kind = 'component') {
+    const isChannel = kind === 'channel';
+    const reference = isChannel
+        ? (item.channel_reference || item.display_reference || item.reference || '')
+        : (item.parent_reference || item.reference || item.model || '');
+    const source = location || item;
     return {
-        document_id: item.document_id,
-        document_title: item.document_title,
-        page_id: item.page_id,
-        page_number: item.page_number,
+        document_id: source.document_id || item.document_id,
+        document_title: source.document_title || item.document_title,
+        page_id: source.page_id || item.page_id,
+        page_number: source.page_number || item.page_number,
         reference,
-        x: item.x,
-        y: item.y,
-        width: item.width,
-        height: item.height,
+        x: source.x,
+        y: source.y,
+        width: source.width,
+        height: source.height,
         context: {
-            detected_type: item.component_type,
+            detected_type: isChannel ? 'canal PLC' : item.component_type,
             model: item.model,
-            description: item.parent_reference
-                ? `${reference} pertenece al módulo ${item.parent_reference}. ${item.description || ''}`.trim()
-                : (item.description || '')
+            description: isChannel
+                ? `${reference} pertenece al módulo ${item.parent_reference || item.reference || 'no identificado'}. ${source.row_text || item.description || ''}`.trim()
+                : `Ubicación física del módulo ${reference}. ${source.row_text || item.description || ''}`.trim()
         }
     };
 }
 
-function openComponentLocation(item) {
-    const result = componentViewerResult(item);
-    if (!result.document_id || !result.page_number) {
-        showMessage(elements.componentsMessage, 'La ficha no tiene una ubicación exacta indexada.', 'error');
+function openComponentLocations(item, kind = 'component') {
+    const locations = kind === 'channel'
+        ? (item.channel_occurrences || [])
+        : (item.module_occurrences || []);
+    const results = locations.length
+        ? locations.map(location => componentViewerResult(item, location, kind))
+        : [componentViewerResult(item, null, kind)];
+    const validResults = results.filter(result => result.document_id && result.page_number);
+    if (!validResults.length) {
+        showMessage(elements.componentsMessage, kind === 'channel'
+            ? 'No hay una aparición exacta indexada para este canal.'
+            : 'No se pudo determinar una ubicación física del módulo.', 'error');
         return;
     }
-    // Abrir directamente la página y el bounding box guardados. No volver a
-    // buscar textos ambiguos como M0, PE o FC011.
-    state.search.results = [result];
-    openViewer(result, 0);
+    // El visor recibe todas las ubicaciones únicas para que Anterior/Siguiente
+    // recorra páginas reales, en lugar de quedar limitado a “1 de 1”.
+    state.search.results = validResults;
+    openViewer(validResults[0], 0);
+}
+
+function openComponentLocation(item) {
+    openComponentLocations(item, item.channel_reference ? 'component' : 'component');
 }
 
 function openComponentInSearch(item) {
@@ -1867,7 +1883,11 @@ function componentSheetMarkup(payload, sourceItem = {}) {
                     <div><dt>Plano</dt><dd>${escapeHtml(c.document_title || '')}${c.page_number ? ` · página ${c.page_number}` : ''}</dd></div>
                 </dl>
                 <div class="component-description"><h3>Descripción técnica</h3><p>${escapeHtml(c.description || 'Todavía no hay una descripción técnica consolidada para este componente.')}</p></div>
-                ${(sourceItem.document_id || c.document_id) && (sourceItem.page_number || c.page_number) ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación exacta en plano</button>` : ''}
+                ${sourceItem.channel_reference ? `
+                    <div class="component-location-actions">
+                        ${(sourceItem.module_occurrences || []).length ? `<button type="button" class="secondary-button" data-sheet-open-module>Ver módulo físico (${sourceItem.module_page_count || 1} pág.)</button>` : '<span class="muted-text">Ubicación física del módulo pendiente de confirmar.</span>'}
+                        ${(sourceItem.channel_occurrences || []).length ? `<button type="button" class="secondary-button" data-sheet-open-channel>Ver canal ${escapeHtml(sourceItem.channel_reference)} (${sourceItem.channel_page_count || 1} pág.)</button>` : ''}
+                    </div>` : ((sourceItem.document_id || c.document_id) && (sourceItem.page_number || c.page_number) ? `<button type="button" class="secondary-button" data-sheet-open-plan>Ver ubicación en plano</button>` : '')}
             </section>
             <aside class="component-sheet-docs">
                 ${payload.occurrence_summary?.page_count ? `<section class="component-occurrence-summary"><h3>Ubicaciones en planos</h3><div class="component-sheet-data compact"><div><dt>Página principal</dt><dd>${escapeHtml(String(c.page_number || '-'))}</dd></div><div><dt>Otras páginas</dt><dd>${escapeHtml((payload.occurrence_summary.pages || []).filter(p => Number(p) !== Number(c.page_number)).slice(0,12).join(', ') || 'Ninguna')}</dd></div><div><dt>Páginas únicas</dt><dd>${escapeHtml(String(payload.occurrence_summary.page_count || 0))}</dd></div><div><dt>Menciones detectadas</dt><dd>${escapeHtml(String(payload.occurrence_summary.total_mentions || 0))}</dd></div></div></section>` : ''}
@@ -1902,7 +1922,9 @@ async function openComponentSheet(item) {
         const payload = await apiRequest(API.componentLibrary(item.id));
         dialog.querySelector('.relations-dialog-body').innerHTML = componentSheetMarkup(payload, item);
         dialog.querySelector('[data-close-component-sheet]').addEventListener('click', () => dialog.close());
-        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentLocation(item); });
+        dialog.querySelector('[data-sheet-open-plan]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'component'); });
+        dialog.querySelector('[data-sheet-open-module]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'component'); });
+        dialog.querySelector('[data-sheet-open-channel]')?.addEventListener('click', () => { dialog.close(); openComponentLocations(item, 'channel'); });
         dialog.querySelectorAll('[data-delete-asset]').forEach(button => button.addEventListener('click', async () => {
             if (!confirm('¿Eliminar este archivo asociado?')) return;
             await apiRequest(`/component-library/assets/${button.dataset.deleteAsset}`, {method:'DELETE'});

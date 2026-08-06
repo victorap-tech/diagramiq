@@ -125,9 +125,17 @@ Archivos principales modificados:
 - Muestra cantidad de apariciones y páginas en cada ficha.
 - La ficha reúne las apariciones secundarias sin crear tarjetas duplicadas.
 
-## v0.11.3 — Canales PLC y ubicación exacta
+## v0.11.4 — Canales PLC y ubicación exacta
 
 - Las consultas de direcciones PLC como `Q5050.0`, `I5050.1` o `QW5260` se muestran con la dirección buscada, no como el nombre genérico del módulo (`M0`).
 - La ficha indica el canal y el módulo físico Siemens al que pertenece.
 - **Ver ubicación exacta en plano** abre directamente la página y el recuadro registrados durante la indexación; no ejecuta una nueva búsqueda textual ambigua.
 - La misma navegación directa se utiliza para componentes con etiquetas repetidas.
+
+## v0.11.4 — Módulo físico y canal separados
+
+- Separa la ubicación física del módulo PLC de las páginas donde aparece una dirección de canal.
+- La ficha de una dirección como `Q5050.0` ofrece dos acciones independientes: **Ver módulo físico** y **Ver canal**.
+- El visor recibe todas las páginas únicas encontradas, por lo que permite recorrerlas con Anterior/Siguiente en vez de quedar en “1 de 1”.
+- Las tablas de asignación de direcciones se penalizan al elegir la página principal del hardware.
+- No requiere reindexar: aprovecha las apariciones ya almacenadas. Si el PDF fue indexado sin coordenadas, conviene reindexarlo para obtener resaltado exacto.
