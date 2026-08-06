@@ -146,3 +146,13 @@ Archivos principales modificados:
 - Ver módulo físico exige modelo exacto y designación física del rack/módulo.
 - Se limita la lista de ubicaciones físicas a candidatos verificables.
 - Al cerrar el visor vuelve a abrirse la ficha técnica.
+
+
+## v0.11.6 — Asistente Anthropic estabilizado
+
+- Reintenta automáticamente una vez cuando Anthropic responde 200 sin texto visible.
+- Tolera variaciones de bloques en la respuesta de Claude.
+- Reintenta errores transitorios 408/429/5xx y fallos breves de red.
+- Devuelve el código HTTP y el detalle real cuando Anthropic rechaza la consulta.
+- Registra en Railway el modelo, intento, stop_reason y tipos de bloque sin exponer la API key.
+- Mantiene intacta la navegación PLC y la biblioteca de la v0.11.5.

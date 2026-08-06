@@ -8,11 +8,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import logging
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
+
+logger = logging.getLogger("diagramiq.ai")
 
 
 @dataclass(frozen=True)
@@ -61,11 +65,31 @@ def _extract_openai_text(payload: dict) -> str:
 
 
 def _extract_anthropic_text(payload: dict) -> str:
+    """Extrae texto de respuestas Anthropic tolerando bloques adicionales.
+
+    Claude puede devolver bloques de texto junto con bloques de pensamiento u otros
+    tipos. Solo exponemos texto visible, pero aceptamos pequeñas variaciones del
+    formato para evitar falsos 502 ante una respuesta válida.
+    """
     parts: list[str] = []
-    for block in payload.get("content", []) or []:
-        if block.get("type") == "text" and isinstance(block.get("text"), str):
-            parts.append(block["text"].strip())
-    return "\n".join(part for part in parts if part).strip()
+    content = payload.get("content", [])
+    if isinstance(content, str):
+        return content.strip()
+    for block in content or []:
+        if isinstance(block, str):
+            if block.strip():
+                parts.append(block.strip())
+            continue
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            parts.append(text.strip())
+            continue
+        nested = block.get("content")
+        if isinstance(nested, str) and nested.strip():
+            parts.append(nested.strip())
+    return "\n".join(parts).strip()
 
 
 def _call_openai(prompt: str, image_bytes: bytes, content_type: str, max_tokens: int) -> VisionResponse:
@@ -203,33 +227,80 @@ def _call_anthropic_text(prompt: str, max_tokens: int) -> VisionResponse:
     if not api_key:
         raise HTTPException(503, "Falta configurar ANTHROPIC_API_KEY en Railway.")
     model = os.getenv("ANTHROPIC_TEXT_MODEL", os.getenv("ANTHROPIC_VISION_MODEL", "claude-sonnet-5")).strip() or "claude-sonnet-5"
-    body = json.dumps({
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=55) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise HTTPException(502, f"Anthropic no pudo responder: {_http_error_detail(exc)}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise HTTPException(504, "Anthropic tardó demasiado o no respondió.") from exc
-    text = _extract_anthropic_text(payload)
-    if not text:
-        raise HTTPException(502, "Anthropic respondió sin texto utilizable.")
-    truncated = payload.get("stop_reason") == "max_tokens"
-    return VisionResponse(text=text, provider="anthropic", model=model, truncated=truncated)
+
+    # Dos intentos: Anthropic puede devolver ocasionalmente una respuesta 200 sin
+    # bloque de texto. El segundo intento pide una salida exclusivamente textual
+    # y evita que una falla transitoria deje inutilizable el asistente.
+    last_payload: dict = {}
+    for attempt in range(2):
+        effective_prompt = prompt
+        effective_tokens = max_tokens
+        if attempt == 1:
+            effective_prompt = (
+                prompt
+                + "\n\nIMPORTANTE: respondé ahora únicamente con texto visible en español; "
+                  "no devuelvas herramientas, JSON ni una respuesta vacía."
+            )
+            effective_tokens = max(700, min(max_tokens, 1800))
+
+        body = json.dumps({
+            "model": model,
+            "max_tokens": effective_tokens,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": effective_prompt}]}],
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=70) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+                payload = json.loads(raw)
+        except urllib.error.HTTPError as exc:
+            detail = _http_error_detail(exc)
+            logger.warning("Anthropic HTTP error attempt=%s model=%s detail=%s", attempt + 1, model, detail)
+            if attempt == 0 and exc.code in {408, 409, 429, 500, 502, 503, 529}:
+                time.sleep(1.0)
+                continue
+            raise HTTPException(502, f"Anthropic no pudo responder (HTTP {exc.code}): {detail}") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            logger.warning("Anthropic network error attempt=%s model=%s error=%r", attempt + 1, model, exc)
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
+            raise HTTPException(504, "Anthropic tardó demasiado o no respondió.") from exc
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Anthropic invalid JSON attempt=%s model=%s", attempt + 1, model)
+            if attempt == 0:
+                time.sleep(0.5)
+                continue
+            raise HTTPException(502, "Anthropic devolvió una respuesta inválida.") from exc
+
+        last_payload = payload if isinstance(payload, dict) else {}
+        text = _extract_anthropic_text(last_payload)
+        if text:
+            truncated = last_payload.get("stop_reason") == "max_tokens"
+            return VisionResponse(text=text, provider="anthropic", model=model, truncated=truncated)
+
+        logger.warning(
+            "Anthropic empty text attempt=%s model=%s stop_reason=%s response_type=%s content_types=%s",
+            attempt + 1,
+            model,
+            last_payload.get("stop_reason"),
+            last_payload.get("type"),
+            [block.get("type") for block in last_payload.get("content", []) if isinstance(block, dict)],
+        )
+        if attempt == 0:
+            time.sleep(0.5)
+
+    stop_reason = last_payload.get("stop_reason") or "desconocido"
+    raise HTTPException(502, f"Anthropic respondió sin texto utilizable (motivo: {stop_reason}).")
 
 
 def ask_text(prompt: str, max_tokens: int | None = None) -> VisionResponse:
