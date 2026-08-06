@@ -1351,3 +1351,22 @@ textarea {
 .modal-header, .viewer-navigation { flex: 0 0 auto; }
 .viewer-image-wrapper { margin: 0; }
 @media (max-width: 760px) { .motor-technical-grid { grid-template-columns: 1fr; } }
+
+
+/* v0.12.5 — visor limpio: sin bloque OCR/contexto sobre el plano */
+#viewerModal .modal-header {
+    padding: 10px 16px;
+    min-height: 0;
+    align-items: center;
+}
+#viewerModal .modal-header h3 { font-size: 1rem; line-height: 1.2; }
+#viewerModal .modal-header p { margin: 2px 0 0; font-size: .82rem; }
+#viewerModal .viewer-context { display: none !important; }
+#viewerModal .viewer-navigation { padding: 8px 12px; }
+#viewerModal .viewer-canvas { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 760px) {
+    #viewerModal .modal-header { padding: 8px 10px; }
+    #viewerModal .modal-header h3 { font-size: .9rem; }
+    #viewerModal .modal-header p { font-size: .74rem; }
+    #viewerModal .viewer-navigation { padding: 6px 8px; gap: 7px; }
+}

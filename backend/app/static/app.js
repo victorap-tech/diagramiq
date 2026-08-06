@@ -2395,6 +2395,8 @@ function openViewer(result, resultIndex = null) {
         elements.viewerTitle.textContent = documentTitle;
     }
 
+    if (elements.viewerContext) elements.viewerContext.innerHTML = "";
+
     if (elements.viewerSubtitle) {
         const subtitle = [];
 
@@ -2404,7 +2406,6 @@ function openViewer(result, resultIndex = null) {
         elements.viewerSubtitle.textContent = subtitle.join(" · ");
     }
 
-    renderViewerContext(result);
     updateViewerNavigation();
     hideReferenceHighlight();
 
