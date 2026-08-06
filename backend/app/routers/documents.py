@@ -996,18 +996,71 @@ def get_document_page(
 def get_document_page_image(
     document_id: int,
     page_number: int,
+    scale: float = 1.5,
     db: Session = Depends(get_db),
 ):
+    """Devuelve la página aunque el PNG temporal se haya perdido en un deploy.
+
+    Primero reutiliza la imagen preprocesada si todavía existe. Si no existe,
+    resuelve el PDF original (incluido S3/Railway Bucket), renderiza la página
+    solicitada y la guarda en un caché temporal.
+    """
     page = db.query(models.DocumentPage).filter(
         models.DocumentPage.document_id == document_id,
         models.DocumentPage.page_number == page_number,
     ).first()
-    if page is None or not page.image_path:
-        raise HTTPException(status_code=404, detail="Imagen de página no encontrada")
-    image_path = Path(page.image_path)
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail="La imagen ya no existe")
-    return FileResponse(image_path, media_type="image/png")
+    if page is None:
+        raise HTTPException(status_code=404, detail="Página no encontrada")
+
+    requested_scale = max(1.0, min(float(scale or 1.5), 4.0))
+    if requested_scale <= 1.6 and page.image_path:
+        image_path = Path(page.image_path)
+        if image_path.exists():
+            return FileResponse(image_path, media_type="image/png")
+
+    document = db.query(models.Document).filter(
+        models.Document.id == document_id
+    ).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    try:
+        local_pdf = resolve_local_file(document.file_path)
+        cache_dir = Path("/tmp/diagramiq-page-cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        scale_key = str(requested_scale).replace(".", "_")
+        cache_path = cache_dir / f"doc_{document_id}_page_{page_number}_s{scale_key}.png"
+
+        if not cache_path.exists():
+            pdf = fitz.open(str(local_pdf))
+            try:
+                page_index = int(page_number) - 1
+                if page_index < 0 or page_index >= pdf.page_count:
+                    raise ValueError("Número de página fuera de rango")
+                pdf_page = pdf.load_page(page_index)
+                pixmap = pdf_page.get_pixmap(
+                    matrix=fitz.Matrix(requested_scale, requested_scale),
+                    alpha=False,
+                )
+                pixmap.save(str(cache_path))
+            finally:
+                pdf.close()
+
+        return FileResponse(
+            cache_path,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception as exc:
+        # Último respaldo: usa el PNG preprocesado si reapareció o sigue montado.
+        if page.image_path:
+            image_path = Path(page.image_path)
+            if image_path.exists():
+                return FileResponse(image_path, media_type="image/png")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No se pudo renderizar la página desde el PDF: {exc}",
+        )
 
 
 @router.get("/pages/{page_id}/image", include_in_schema=False)

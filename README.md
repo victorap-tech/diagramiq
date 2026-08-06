@@ -1,4 +1,4 @@
-# DiagramIQ v0.13.4
+# DiagramIQ v0.13.5
 
 Basada en v0.13.3.
 
