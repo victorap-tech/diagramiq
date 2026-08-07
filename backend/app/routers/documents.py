@@ -2,6 +2,7 @@ import hashlib
 import logging
 import re
 import shutil
+import threading
 from pathlib import Path
 from uuid import uuid4
 
@@ -164,26 +165,91 @@ def find_existing_document_by_hash(
     return keeper
 
 
+_processing_lock = threading.Lock()
+_active_processing_ids: set[int] = set()
+
+
 def process_document_in_background(document_id: int) -> None:
-    """Indexa el PDF y revierte completamente una carga que falle."""
+    """Indexa un PDF sin borrar el documento si la tarea falla.
+
+    El estado y el mensaje de error quedan persistidos en PostgreSQL para que
+    el documento pueda reintentarse sin volver a subir el archivo del Bucket.
+    """
+    with _processing_lock:
+        if document_id in _active_processing_ids:
+            logger.info("[INDEX] Documento %s ya tiene un worker activo", document_id)
+            return
+        _active_processing_ids.add(document_id)
+
     db = SessionLocal()
-    document = None
     try:
         document = db.query(models.Document).filter(models.Document.id == document_id).first()
-        if document is not None:
-            process_pdf_document(document=document, db=db)
+        if document is None:
+            logger.warning("[INDEX] Documento %s no existe", document_id)
+            return
+        logger.info("[INDEX] Iniciando documento %s (%s)", document_id, document.filename)
+        process_pdf_document(document=document, db=db)
+        logger.info("[INDEX] Documento %s completado", document_id)
     except Exception:
         db.rollback()
-        document = db.query(models.Document).filter(models.Document.id == document_id).first()
-        if document is not None:
-            _remove_document_files(document)
-            try:
-                db.delete(document)
-                db.commit()
-            except Exception:
-                db.rollback()
+        logger.exception("[INDEX] Falló el documento %s", document_id)
+        # process_pdf_document ya deja processing_status=error y el motivo
+        # persistido. No eliminar PDF, registro ni índices parciales.
     finally:
         db.close()
+        with _processing_lock:
+            _active_processing_ids.discard(document_id)
+
+
+def start_document_worker(document_id: int) -> bool:
+    """Lanza un worker daemon y evita iniciar dos veces el mismo documento."""
+    with _processing_lock:
+        if document_id in _active_processing_ids:
+            return False
+    thread = threading.Thread(
+        target=process_document_in_background,
+        args=(document_id,),
+        name=f"diagramiq-index-{document_id}",
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+def recover_queued_documents() -> list[int]:
+    """Reanuda trabajos que quedaron en cola tras un deploy/reinicio.
+
+    Solo toma estados pendientes. Los documentos con error requieren una nueva
+    orden explícita de Reindexar para no entrar en un bucle de fallos.
+    """
+    db = SessionLocal()
+    try:
+        queued = (
+            db.query(models.Document)
+            .filter(models.Document.processing_status == "pending")
+            .order_by(models.Document.id.asc())
+            .all()
+        )
+        ids = [item.id for item in queued]
+        for item in queued:
+            item.processing_stage = "waiting"
+            item.processing_message = "Reindexación recuperada tras reinicio"
+        if queued:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[INDEX] No se pudo recuperar la cola pendiente")
+        return []
+    finally:
+        db.close()
+
+    started: list[int] = []
+    for document_id in ids:
+        if start_document_worker(document_id):
+            started.append(document_id)
+    if started:
+        logger.info("[INDEX] Cola recuperada; workers iniciados: %s", started)
+    return started
 
 
 def get_or_create_sector(
@@ -833,8 +899,10 @@ def reindex_document(document_id: int, background_tasks: BackgroundTasks, db: Se
     document.processed_pages = 0
     document.processing_message = "Reindexación en cola"
     db.commit()
-    background_tasks.add_task(process_document_in_background, document.id)
-    return {"message": "Reindexación iniciada", "document_id": document.id}
+    started = start_document_worker(document.id)
+    if not started:
+        logger.info("[INDEX] Documento %s ya estaba siendo procesado", document.id)
+    return {"message": "Reindexación iniciada", "document_id": document.id, "worker_started": started}
 
 
 @router.post("/{document_id}/cancel", status_code=status.HTTP_202_ACCEPTED)

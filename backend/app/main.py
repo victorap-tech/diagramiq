@@ -127,10 +127,10 @@ ensure_processing_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.13.8",
+    version="0.14.1",
 )
 
-APP_VERSION = "0.13.8"
+APP_VERSION = "0.14.1"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -170,6 +170,14 @@ app.include_router(component_catalog.router)
 app.include_router(component_relations.router)
 app.include_router(assistant_chat.router)
 app.include_router(component_library.router)
+
+
+@app.on_event("startup")
+def resume_pending_index_jobs() -> None:
+    """Retoma documentos que quedaron en cola cuando Railway redeploya."""
+    started = documents.recover_queued_documents()
+    if started:
+        print(f"[INDEX] Reanudados al iniciar: {started}")
 
 # ==========================
 # Frontend
