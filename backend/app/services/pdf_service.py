@@ -804,7 +804,7 @@ def process_pdf_document(
 
         return processed_pages
 
-    except Exception:
+    except Exception as exc:
         db.rollback()
 
         document_db = (
@@ -819,7 +819,8 @@ def process_pdf_document(
         if document_db is not None:
             document_db.processing_status = "error"
             document_db.processing_stage = "error"
-            document_db.processing_message = "El procesamiento terminó con error"
+            safe_error = re.sub(r"(?i)(api[_-]?key|secret|password|token)\s*[=:]\s*\S+", r"\1=***", str(exc))
+            document_db.processing_message = f"El procesamiento terminó con error: {safe_error[:500]}"
             document_db.connection_status = "error"
             db.commit()
 

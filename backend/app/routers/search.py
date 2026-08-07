@@ -28,6 +28,36 @@ SCHEMATIC_KEYWORDS = (
     "SENSOR", "MODULO", "MÓDULO", "SIEMENS", "PLC",
 )
 
+GENERIC_CODE_PATTERN = re.compile(
+    r"(?<![A-Z0-9])[-=+]?(?=[A-Z0-9_.\-/]*[A-Z])(?=[A-Z0-9_.\-/]*\d)"
+    r"[A-Z0-9]+(?:[_.\-/][A-Z0-9]+)+(?![A-Z0-9])",
+    re.IGNORECASE,
+)
+
+def canonical_reference(value: str | None) -> str:
+    """Iguala códigos del plano/HMI aunque cambie _, - o punto.
+
+    Ej.: S7_1, S7-1 y S7.1 se comparan como S71.
+    """
+    normalized = normalize_reference(value or "")
+    return re.sub(r"[^A-Z0-9]+", "", normalized.upper())
+
+def canonical_sql(column):
+    value = func.upper(func.coalesce(column, ""))
+    for separator in ("_", "-", ".", "/", " "):
+        value = func.replace(value, separator, "")
+    value = func.replace(func.replace(func.replace(value, "=", ""), "+", ""), "\\", "")
+    return value
+
+def reference_variants(value: str) -> set[str]:
+    normalized = normalize_reference(value)
+    variants = {normalized}
+    if any(sep in normalized for sep in ("_", "-", ".", "/")):
+        parts = [part for part in re.split(r"[_.\-/]+", normalized) if part]
+        if len(parts) >= 2:
+            variants.update({sep.join(parts) for sep in ("_", "-", ".", "/")})
+    return {item for item in variants if item}
+
 
 def reference_family(reference: str) -> str:
     value = normalize_reference(reference)
@@ -297,8 +327,13 @@ def expanded_component_coordinates(item: models.ComponentReference, ranking: dic
     return {"x": left, "y": top, "width": width, "height": height}
 
 def extract_search_references(query: str) -> list[str]:
-    matches = REFERENCE_PATTERN.findall((query or "").upper())
-    return sorted({normalize_reference(m) for m in matches if normalize_reference(m)})
+    text = (query or "").upper()
+    matches = list(REFERENCE_PATTERN.findall(text))
+    # Muchos HMI reemplazan el guion bajo del plano por guion medio.
+    # También admite códigos de máquina no incluidos en los prefijos IEC.
+    matches.extend(GENERIC_CODE_PATTERN.findall(text))
+    values = {normalize_reference(match) for match in matches if normalize_reference(match)}
+    return sorted(values)
 
 
 def build_fragment(text: str | None, query: str, before: int = 100, after: int = 180) -> str:
@@ -421,9 +456,13 @@ def search_documents(
         )
         filters = []
         for reference in extracted_references:
+            variants = reference_variants(reference)
+            canonical = canonical_reference(reference)
             filters.extend([
-                models.ComponentReference.normalized_reference == reference,
-                models.ComponentReference.reference.ilike(reference),
+                models.ComponentReference.normalized_reference.in_(variants),
+                models.ComponentReference.reference.in_(variants),
+                canonical_sql(models.ComponentReference.normalized_reference) == canonical,
+                canonical_sql(models.ComponentReference.reference) == canonical,
             ])
         query = query.filter(or_(*filters))
         if sector_id is not None:
@@ -456,6 +495,11 @@ def search_documents(
         if not tokens:
             return {"query": clean_query, "detected_references": extracted_references, "results": [], "count": 0, "total": 0, "limit": limit, "offset": offset, "has_more": False, "search_mode": "index"}
         indexed_term = max(tokens, key=len)
+        term_canonical = canonical_reference(indexed_term)
+        term_filters = [models.PageSearchTerm.term == indexed_term]
+        if term_canonical and any(ch.isdigit() for ch in term_canonical):
+            term_filters.append(canonical_sql(models.PageSearchTerm.term) == term_canonical)
+            term_filters.append(canonical_sql(models.PageSearchTerm.display_text) == term_canonical)
         query = (
             db.query(models.PageSearchTerm)
             .options(
@@ -466,7 +510,7 @@ def search_documents(
             )
             .join(models.DocumentPage)
             .join(models.Document)
-            .filter(models.PageSearchTerm.term == indexed_term)
+            .filter(or_(*term_filters))
         )
         if sector_id is not None:
             query = query.filter(models.Document.sector_id == sector_id)
