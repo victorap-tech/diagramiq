@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app import models
 from app.database import get_db
-from app.routers.component_catalog import infer_type
+from app.routers.component_catalog import infer_type, is_nonphysical_reference, normalize_term
 
 router = APIRouter(prefix="/component-relations", tags=["Relaciones entre componentes"])
 
@@ -16,6 +16,7 @@ PREFIX_ROLE = {
     "relé térmico": "protección térmica",
     "fusible": "protección",
     "variador": "control de motor",
+    "arrancador suave": "arranque/control de motor",
     "PLC": "control lógico",
     "módulo de entradas": "entrada de control",
     "módulo de salidas": "salida de control",
@@ -47,6 +48,7 @@ def _relation_hint(source_type: str, target_type: str) -> str:
         ("contactor", "motor"): "posible maniobra del motor",
         ("relé térmico", "motor"): "posible protección térmica",
         ("variador", "motor"): "posible control del motor",
+        ("arrancador suave", "motor"): "posible arranque suave del motor",
         ("PLC", "módulo de salidas"): "posible vínculo de control",
         ("módulo de salidas", "contactor"): "posible salida hacia bobina",
         ("sensor", "módulo de entradas"): "posible señal de entrada",
@@ -54,6 +56,42 @@ def _relation_hint(source_type: str, target_type: str) -> str:
     }
     return known.get(pair) or known.get((target_type, source_type)) or "posible relación por proximidad"
 
+
+
+MOTOR_RELATED_PRIORITY = {
+    "arrancador suave": 0,
+    "variador": 1,
+    "guardamotor": 2,
+    "contactor": 3,
+    "relé térmico": 4,
+    "interruptor": 5,
+    "fusible": 6,
+    "bornera": 7,
+    "módulo de salidas": 8,
+    "PLC": 9,
+}
+
+GENERIC_RELATED = {
+    "N", "PE", "L", "L1", "L2", "L3", "L+", "L-", "M", "0V", "24V", "+24V",
+    "U", "V", "W", "U1", "V1", "W1", "13", "14", "21", "22",
+}
+
+def _is_junk_related(ref) -> bool:
+    value = (ref.reference or "").strip()
+    normalized = normalize_term(value)
+    if not normalized:
+        return True
+    if is_nonphysical_reference(value) or normalized in {normalize_term(v) for v in GENERIC_RELATED}:
+        return True
+    if re.fullmatch(r"\d{1,2}", normalized):
+        return True
+    return False
+
+def _relation_priority(source_type: str, target_type: str, confidence: int | float = 0) -> tuple:
+    """Para motores, primero equipos de potencia/protección; después control/señales."""
+    if source_type == "motor":
+        return (MOTOR_RELATED_PRIORITY.get(target_type, 50), -int(confidence or 0))
+    return (0, -int(confidence or 0))
 
 def _indexed_edges(reference_id: int, db: Session):
     rows = (
@@ -86,11 +124,17 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
     if indexed:
         doc = page.document
         relations = []
-        for edge, ref in indexed[:20]:
+        for edge, ref in indexed:
+            if _is_junk_related(ref):
+                continue
+            target_type = infer_type(ref.reference, ref.detected_type, ref.component_type, ref.model, ref.description or ref.row_text)
+            # Si el origen es motor, no ensuciar con señales genéricas: priorizar potencia/protección.
+            if source_type == "motor" and target_type not in MOTOR_RELATED_PRIORITY:
+                continue
             relations.append({
                 "id": ref.id,
                 "reference": ref.reference,
-                "component_type": infer_type(ref.reference, ref.detected_type, ref.component_type),
+                "component_type": target_type,
                 "model": ref.model or "",
                 "description": ref.description or ref.row_text or "",
                 "distance": _distance(source, ref),
@@ -98,7 +142,11 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
                 "relation": edge.relation_type,
                 "reason": edge.reason or "relación indexada",
                 "x": ref.x, "y": ref.y, "width": ref.width, "height": ref.height,
+                "page_id": ref.document_page_id,
+                "page_number": ref.document_page.page_number if ref.document_page else None,
+                "document_id": ref.document_page.document_id if ref.document_page else None,
             })
+        relations.sort(key=lambda item: _relation_priority(source_type, item["component_type"], item["confidence"]))
         return {
             "source": {
                 "id": source.id, "reference": source.reference,
@@ -121,7 +169,11 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
     source_text = " ".join(filter(None, [source.row_text, source.description])).upper()
     relations = []
     for ref in refs:
-        target_type = infer_type(ref.reference, ref.detected_type, ref.component_type)
+        if _is_junk_related(ref):
+            continue
+        target_type = infer_type(ref.reference, ref.detected_type, ref.component_type, ref.model, ref.description or ref.row_text)
+        if source_type == "motor" and target_type not in MOTOR_RELATED_PRIORITY:
+            continue
         dist = _distance(source, ref)
         mentioned = bool(ref.reference and re.search(rf"(?<![A-Z0-9]){re.escape(ref.reference.upper())}(?![A-Z0-9])", source_text))
         reverse_text = " ".join(filter(None, [ref.row_text, ref.description])).upper()
@@ -158,7 +210,7 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
             "x": ref.x, "y": ref.y, "width": ref.width, "height": ref.height,
         })
 
-    relations.sort(key=lambda item: (-item["confidence"], item["distance"] if item["distance"] is not None else 999999))
+    relations.sort(key=lambda item: (_relation_priority(source_type, item["component_type"], item["confidence"]), item["distance"] if item["distance"] is not None else 999999))
     doc = page.document
     return {
         "source": {
@@ -206,7 +258,11 @@ def _candidate_edges(source, db: Session):
     )
     edges = []
     for ref in refs:
-        target_type = infer_type(ref.reference, ref.detected_type, ref.component_type)
+        if _is_junk_related(ref):
+            continue
+        target_type = infer_type(ref.reference, ref.detected_type, ref.component_type, ref.model, ref.description or ref.row_text)
+        if source_type == "motor" and target_type not in MOTOR_RELATED_PRIORITY:
+            continue
         dist = _distance(source, ref)
         mentioned = bool(ref.reference and re.search(rf"(?<![A-Z0-9]){re.escape(ref.reference.upper())}(?![A-Z0-9])", source_text))
         reverse_text = " ".join(filter(None, [ref.row_text, ref.description])).upper()

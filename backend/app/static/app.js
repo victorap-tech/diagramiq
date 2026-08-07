@@ -2141,7 +2141,7 @@ function openComponentLocation(item) {
 function openComponentInSearch(item) {
     document.querySelector('[data-section="searchSection"]')?.click();
     elements.searchInput.value = item.reference || item.model || '';
-    // v0.14.6: una relación devuelta por el backend no siempre trae scope.
+    // v0.14.7: una relación devuelta por el backend no siempre trae scope.
     // En ese caso NO borrar los selectores actuales: conserva el sector de la consulta.
     const organizationId = item.organization_id || elements.searchOrganization?.value || '';
     const plantId = item.plant_id || elements.searchPlant?.value || '';
@@ -2417,7 +2417,7 @@ async function showComponentRelations(item) {
     const dialog = document.createElement('dialog');
     dialog.id = 'componentRelationsDialog';
     dialog.className = 'relations-dialog';
-    dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Analizando relaciones</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-relations>✕</button></div><div class="loading-state">Buscando componentes relacionados en la misma página…</div></div>`;
+    dialog.innerHTML = `<div class="relations-dialog-body"><div class="relations-dialog-header"><div><small>Analizando relaciones</small><h2>${escapeHtml(item.reference || 'Componente')}</h2></div><button type="button" class="icon-button" data-close-relations>✕</button></div><div class="loading-state">Buscando protecciones, maniobra y control asociados al componente…</div></div>`;
     document.body.appendChild(dialog);
     dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => {
@@ -2435,8 +2435,38 @@ async function showComponentRelations(item) {
         dialog.querySelector('[data-close-relations]').addEventListener('click', () => dialog.close());
         dialog.querySelectorAll('[data-open-related]').forEach(btn => btn.addEventListener('click', () => {
             const rel = rows[Number(btn.dataset.openRelated)];
+            if (!rel) return;
+            // Si el backend ya conoce la aparición exacta, abrirla sin relanzar una
+            // búsqueda que pueda perder sector o caer en un TAG ambiguo.
+            if (rel.document_id && rel.page_number) {
+                dialog.dataset.reopenAfterViewer = '1';
+                dialog.close();
+                openViewer({
+                    document_id: rel.document_id,
+                    title: response.source?.document_title || '',
+                    page_id: rel.page_id || null,
+                    page_number: rel.page_number,
+                    page: rel.page_number,
+                    reference: rel.reference,
+                    coordinates: (rel.x != null && rel.y != null && rel.width != null && rel.height != null)
+                        ? {x: rel.x, y: rel.y, width: rel.width, height: rel.height}
+                        : null,
+                    label_coordinates: (rel.x != null && rel.y != null && rel.width != null && rel.height != null)
+                        ? {x: rel.x, y: rel.y, width: rel.width, height: rel.height}
+                        : null,
+                    image_path: `/documents/${rel.document_id}/pages/${rel.page_number}/image`,
+                }, null);
+                return;
+            }
             dialog.close();
-            openComponentInSearch({...item, reference: rel.reference, model: rel.model});
+            openComponentInSearch({
+                ...item,
+                reference: rel.reference,
+                model: rel.model,
+                organization_id: item.organization_id || selectedNumericValue(elements.searchOrganization),
+                plant_id: item.plant_id || selectedNumericValue(elements.searchPlant),
+                sector_id: item.sector_id || selectedNumericValue(elements.searchSector),
+            });
         }));
     } catch (error) {
         dialog.querySelector('.relations-dialog-body').innerHTML = `<div class="relations-dialog-header"><h2>No se pudieron cargar las relaciones</h2><button type="button" class="icon-button" data-close-relations>✕</button></div><p>${escapeHtml(error.message)}</p>`;

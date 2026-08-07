@@ -499,6 +499,35 @@ def with_relations(query):
     )
 
 
+
+def _fallback_label_coordinates(db: Session, page_id: int, variants: list[str]) -> dict | None:
+    """Recupera las coordenadas exactas del TAG desde PageSearchTerm para resaltar en amarillo."""
+    canonical_variants = {canonical_reference(v) for v in variants if canonical_reference(v)}
+    if not canonical_variants:
+        return None
+    terms = (
+        db.query(models.PageSearchTerm)
+        .filter(models.PageSearchTerm.document_page_id == page_id)
+        .all()
+    )
+    best = None
+    for term in terms:
+        candidates = [getattr(term, "term", None), getattr(term, "display_text", None)]
+        if not any(canonical_reference(c or "") in canonical_variants for c in candidates):
+            continue
+        if None in (term.x, term.y, term.width, term.height):
+            continue
+        # Preferir el texto más parecido al TAG completo, no una parte genérica.
+        display = (term.display_text or term.term or "")
+        exact = max((1 if canonical_reference(display) == cv else 0) for cv in canonical_variants)
+        score = (exact, len(canonical_reference(display)))
+        if best is None or score > best[0]:
+            best = (score, term)
+    if best is None:
+        return None
+    term = best[1]
+    return {"x": term.x, "y": term.y, "width": term.width, "height": term.height}
+
 def _page_text_fallback(
     db: Session,
     reference: str,
@@ -558,13 +587,15 @@ def _page_text_fallback(
             reasons.extend(["evidencia_motor", "pagina_fisica_prioritaria"])
         result = base_result(page, clean_query)
         context["detected_type"] = inferred_type
+        label_coordinates = _fallback_label_coordinates(db, page.id, variants)
         result.update({
             "match_type": "indexed_page_text",
             "reference": reference,
             "normalized_reference": normalize_reference(reference),
             "component_type": inferred_type,
             "fragment": fragment,
-            "coordinates": None,
+            "coordinates": label_coordinates,
+            "label_coordinates": label_coordinates,
             "context": context,
             "score": score,
             "page_kind": "component" if score >= 150 else "possible_component",
