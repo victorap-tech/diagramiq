@@ -169,59 +169,62 @@ _processing_lock = threading.Lock()
 _active_processing_ids: set[int] = set()
 
 
-def process_document_in_background(document_id: int) -> None:
-    """Indexa un PDF sin borrar el documento si la tarea falla.
-
-    El estado y el mensaje de error quedan persistidos en PostgreSQL para que
-    el documento pueda reintentarse sin volver a subir el archivo del Bucket.
-    """
-    with _processing_lock:
-        if document_id in _active_processing_ids:
-            logger.info("[INDEX] Documento %s ya tiene un worker activo", document_id)
-            return
-        _active_processing_ids.add(document_id)
+def process_document_in_background(document_id: int, already_claimed: bool = False) -> None:
+    """Indexa un PDF y conserva PDF/registro ante cualquier fallo."""
+    if not already_claimed:
+        with _processing_lock:
+            if document_id in _active_processing_ids:
+                print(f"[INDEX] Documento {document_id} ya tiene un worker activo", flush=True)
+                return
+            _active_processing_ids.add(document_id)
 
     db = SessionLocal()
     try:
+        print(f"[INDEX] Worker ejecutándose para documento {document_id}", flush=True)
         document = db.query(models.Document).filter(models.Document.id == document_id).first()
         if document is None:
-            logger.warning("[INDEX] Documento %s no existe", document_id)
+            print(f"[INDEX] Documento {document_id} no existe", flush=True)
             return
-        logger.info("[INDEX] Iniciando documento %s (%s)", document_id, document.filename)
+        print(f"[INDEX] Iniciando documento {document_id} ({document.filename})", flush=True)
         process_pdf_document(document=document, db=db)
-        logger.info("[INDEX] Documento %s completado", document_id)
-    except Exception:
+        print(f"[INDEX] Documento {document_id} completado", flush=True)
+    except Exception as exc:
         db.rollback()
         logger.exception("[INDEX] Falló el documento %s", document_id)
-        # process_pdf_document ya deja processing_status=error y el motivo
-        # persistido. No eliminar PDF, registro ni índices parciales.
+        print(f"[INDEX] ERROR documento {document_id}: {type(exc).__name__}: {exc}", flush=True)
     finally:
         db.close()
         with _processing_lock:
             _active_processing_ids.discard(document_id)
+        print(f"[INDEX] Worker finalizado para documento {document_id}", flush=True)
 
 
 def start_document_worker(document_id: int) -> bool:
-    """Lanza un worker daemon y evita iniciar dos veces el mismo documento."""
+    """Reserva el documento ANTES de crear el hilo y luego lanza el worker."""
     with _processing_lock:
         if document_id in _active_processing_ids:
+            print(f"[INDEX] No se inicia duplicado para documento {document_id}", flush=True)
             return False
-    thread = threading.Thread(
-        target=process_document_in_background,
-        args=(document_id,),
-        name=f"diagramiq-index-{document_id}",
-        daemon=True,
-    )
-    thread.start()
-    return True
+        _active_processing_ids.add(document_id)
+    try:
+        thread = threading.Thread(
+            target=process_document_in_background,
+            args=(document_id, True),
+            name=f"diagramiq-index-{document_id}",
+            daemon=True,
+        )
+        thread.start()
+        print(f"[INDEX] Worker lanzado para documento {document_id}", flush=True)
+        return True
+    except Exception:
+        with _processing_lock:
+            _active_processing_ids.discard(document_id)
+        logger.exception("[INDEX] No se pudo lanzar worker para documento %s", document_id)
+        return False
 
 
 def recover_queued_documents() -> list[int]:
-    """Reanuda trabajos que quedaron en cola tras un deploy/reinicio.
-
-    Solo toma estados pendientes. Los documentos con error requieren una nueva
-    orden explícita de Reindexar para no entrar en un bucle de fallos.
-    """
+    """Reanuda trabajos pendientes tras deploy/reinicio y lanza workers reales."""
     db = SessionLocal()
     try:
         queued = (
@@ -231,14 +234,16 @@ def recover_queued_documents() -> list[int]:
             .all()
         )
         ids = [item.id for item in queued]
+        print(f"[INDEX] Pendientes encontrados al iniciar: {ids}", flush=True)
         for item in queued:
             item.processing_stage = "waiting"
             item.processing_message = "Reindexación recuperada tras reinicio"
         if queued:
             db.commit()
-    except Exception:
+    except Exception as exc:
         db.rollback()
         logger.exception("[INDEX] No se pudo recuperar la cola pendiente")
+        print(f"[INDEX] ERROR recuperando cola: {type(exc).__name__}: {exc}", flush=True)
         return []
     finally:
         db.close()
@@ -247,8 +252,7 @@ def recover_queued_documents() -> list[int]:
     for document_id in ids:
         if start_document_worker(document_id):
             started.append(document_id)
-    if started:
-        logger.info("[INDEX] Cola recuperada; workers iniciados: %s", started)
+    print(f"[INDEX] Workers iniciados al recuperar: {started}", flush=True)
     return started
 
 
@@ -903,6 +907,28 @@ def reindex_document(document_id: int, background_tasks: BackgroundTasks, db: Se
     if not started:
         logger.info("[INDEX] Documento %s ya estaba siendo procesado", document.id)
     return {"message": "Reindexación iniciada", "document_id": document.id, "worker_started": started}
+
+
+@router.post("/{document_id}/retry-now", status_code=status.HTTP_202_ACCEPTED)
+def retry_document_now(document_id: int, db: Session = Depends(get_db)):
+    """Fuerza un reintento inmediato sin volver a subir ni borrar el PDF."""
+    document = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    with _processing_lock:
+        active = document_id in _active_processing_ids
+    if active:
+        return {"message": "El worker ya está activo", "document_id": document_id, "worker_started": False}
+    document.processing_status = "pending"
+    document.processing_stage = "waiting"
+    document.processing_progress = 0
+    document.processed_pages = 0
+    document.processing_message = "Reintento inmediato solicitado"
+    db.commit()
+    started = start_document_worker(document_id)
+    if not started:
+        raise HTTPException(status_code=409, detail="No se pudo iniciar el worker")
+    return {"message": "Worker iniciado ahora", "document_id": document_id, "worker_started": True}
 
 
 @router.post("/{document_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
