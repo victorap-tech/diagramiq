@@ -1511,6 +1511,9 @@ async function handleCableTagPhoto(event) {
 
     const formData = new FormData();
     formData.append("image", file);
+    if (elements.searchOrganization?.value) formData.append("organization_id", elements.searchOrganization.value);
+    if (elements.searchPlant?.value) formData.append("plant_id", elements.searchPlant.value);
+    if (elements.searchSector?.value) formData.append("sector_id", elements.searchSector.value);
 
     try {
         const response = await apiRequest(API.cableTagRecognize, {
@@ -1556,6 +1559,9 @@ async function handleComponentPhoto(event) {
 
     const formData = new FormData();
     formData.append("image", file);
+    if (elements.searchOrganization?.value) formData.append("organization_id", elements.searchOrganization.value);
+    if (elements.searchPlant?.value) formData.append("plant_id", elements.searchPlant.value);
+    if (elements.searchSector?.value) formData.append("sector_id", elements.searchSector.value);
 
     try {
         const response = await apiRequest(API.componentRecognize, {
@@ -1641,6 +1647,9 @@ async function analyzePendingVisionPhoto() {
     }
     const formData = new FormData();
     formData.append("image", file);
+    if (elements.searchOrganization?.value) formData.append("organization_id", elements.searchOrganization.value);
+    if (elements.searchPlant?.value) formData.append("plant_id", elements.searchPlant.value);
+    if (elements.searchSector?.value) formData.append("sector_id", elements.searchSector.value);
     try {
         const response = await apiRequest(API.visionAnalyze, { method: "POST", body: formData });
         lastVisionQuery = String(response?.search_query || "").trim();
@@ -1656,12 +1665,37 @@ async function analyzePendingVisionPhoto() {
             ["Descripción", response?.description], ["Modelo IA", response?.model_used],
         ].filter(([, value]) => String(value || "").trim());
         if (elements.visionResultDetails) {
-            elements.visionResultDetails.innerHTML = rows.map(([label, value]) =>
+            const summaryHtml = rows.map(([label, value]) =>
                 `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`
             ).join("") || `<div><strong>${escapeHtml(response?.message || "No se pudo leer información suficiente.")}</strong></div>`;
+            const matches = Array.isArray(response?.matches) ? response.matches : [];
+            const matchesHtml = matches.length ? `
+                <section class="vision-matches">
+                    <h4>Coincidencias en planos</h4>
+                    ${matches.map((match, index) => `
+                        <article class="vision-match-card">
+                            <div class="vision-match-score">${escapeHtml(String(match.similarity || 0))}%</div>
+                            <div class="vision-match-body">
+                                <strong>${escapeHtml(match.reference || match.model || "Coincidencia")}</strong>
+                                <span>${escapeHtml([match.component_type, match.manufacturer, match.model].filter(Boolean).join(" · "))}</span>
+                                <small>${escapeHtml([match.title, match.sector_name, `Página ${match.page_number}`].filter(Boolean).join(" · "))}</small>
+                                <small>${escapeHtml((match.reasons || []).join(" + "))}</small>
+                            </div>
+                            <button type="button" class="secondary-button vision-open-match" data-vision-match="${index}">Ver en plano</button>
+                        </article>`).join("")}
+                </section>` : `<div class="vision-no-matches">No se encontraron coincidencias suficientes en los planos del sector seleccionado.</div>`;
+            elements.visionResultDetails.innerHTML = summaryHtml + matchesHtml;
+            elements.visionResultDetails.querySelectorAll(".vision-open-match").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const match = matches[Number(button.dataset.visionMatch)];
+                    if (!match) return;
+                    state.search.results = matches;
+                    openViewer(match, Number(button.dataset.visionMatch));
+                });
+            });
         }
         if (elements.visionStatus) {
-            elements.visionStatus.textContent = lastVisionQuery ? `Detectado: ${lastVisionQuery}` : (response?.message || "Acercá la cámara al TAG o a la placa y probá otra vez.");
+            elements.visionStatus.textContent = response?.match_count ? `${response.match_count} coincidencia(s). Mejor similitud: ${response.best_similarity}%` : (lastVisionQuery ? `Detectado: ${lastVisionQuery}`  : (response?.message || "Acercá la cámara al TAG o a la placa y probá otra vez."));
             elements.visionStatus.className = `vision-status ${lastVisionQuery ? "success" : "error"}`;
         }
         if (elements.visionSearchButton) elements.visionSearchButton.disabled = !lastVisionQuery;

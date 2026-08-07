@@ -1400,3 +1400,14 @@ textarea {
 /* v0.13.6: vista previa y análisis real de DiagramIQ Vision */
 .vision-preview-panel { margin-top: 14px; padding: 12px; border: 1px solid #d7e4f1; border-radius: 14px; background: #f7fbff; }
 .vision-preview { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 10px; background: #101820; }
+
+/* v0.13.9 - Coincidencias de DiagramIQ Vision */
+.vision-matches { grid-column: 1 / -1; margin-top: 14px; border-top: 1px solid #d7e4f1; padding-top: 12px; }
+.vision-matches h4 { margin: 0 0 10px; }
+.vision-match-card { display: grid !important; grid-template-columns: 58px minmax(0,1fr) auto !important; align-items: center; gap: 10px !important; padding: 10px; margin-bottom: 8px; border: 1px solid #d7e4f1; border-radius: 12px; background: #fff; }
+.vision-match-score { display: grid; place-items: center; min-height: 48px; border-radius: 10px; font-size: 17px; font-weight: 900; background: #e8f3ff; color: #075fb8; }
+.vision-match-body { display: grid; gap: 3px; min-width: 0; }
+.vision-match-body span, .vision-match-body small { overflow-wrap: anywhere; }
+.vision-match-body small { color: var(--muted-text, #5f6b7a); }
+.vision-no-matches { grid-column: 1 / -1; margin-top: 12px; padding: 10px; border-radius: 10px; background: #fff5df; }
+@media (max-width: 700px) { .vision-match-card { grid-template-columns: 52px minmax(0,1fr) !important; } .vision-match-card button { grid-column: 1 / -1; width: 100%; } }
