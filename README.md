@@ -1,4 +1,4 @@
-# DiagramIQ v0.14.7
+# DiagramIQ v0.14.8
 
 Correcciones sobre v0.14.5:
 - El componente principal del asistente prioriza la aparición física con evidencia técnica (potencia, tensión, corriente, RPM y función) sobre menciones en listas PLC/HMI.
@@ -10,9 +10,16 @@ Correcciones sobre v0.14.5:
 Deploy: subir el proyecto completo a Railway como en la versión anterior. No requiere borrar PDFs ni reconstruir el bucket por este cambio de interfaz/consulta.
 
 
-## v0.14.7
+## v0.14.8
 - Relacionados de motor prioriza arrancador suave, variador, guardamotor, contactor y protección térmica.
 - Filtra potenciales y referencias genéricas (N, PE, L1, bornes sueltos).
 - Reconoce Siemens 3RW como arrancador suave.
 - El fallback de búsqueda recupera coordenadas exactas del TAG para el resaltado amarillo también en modo específico.
 - Al abrir un relacionado con ubicación conocida, navega directo al plano sin perder el sector.
+
+
+## v0.14.8
+- Ver relacionados ya no depende exclusivamente de fichas catalogadas.
+- Para motores detecta en el texto eléctrico modelos 3RW (arrancador suave), 3RV/GV2 (guardamotor), 3RT (contactor) y familias comunes de variadores.
+- Caso de validación: TC-7002-1 debe relacionar 3RW5513-3HA04 como arrancador suave Siemens en la página del circuito.
+- Abrir una relación exacta muestra navegación 1 de 1 en vez de 0 de 0.

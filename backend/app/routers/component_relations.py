@@ -71,6 +71,122 @@ MOTOR_RELATED_PRIORITY = {
     "PLC": 9,
 }
 
+
+
+TEXT_DEVICE_RULES = (
+    (re.compile(r"\b(3RW[0-9A-Z-]{4,})\b", re.IGNORECASE), "arrancador suave", "Siemens", "arranque/control de motor"),
+    (re.compile(r"\b(3RV[0-9A-Z-]{4,})\b", re.IGNORECASE), "guardamotor", "Siemens", "protección de motor"),
+    (re.compile(r"\b(3RT[0-9A-Z-]{4,})\b", re.IGNORECASE), "contactor", "Siemens", "maniobra de motor"),
+    (re.compile(r"\b(ATV[0-9A-Z-]{2,}|ALTIVAR[0-9A-Z-]*)\b", re.IGNORECASE), "variador", "Schneider Electric", "control de motor"),
+    (re.compile(r"\b(VLT[- ]?[0-9A-Z-]+|FC[- ]?[0-9]{2,4}[A-Z0-9-]*)\b", re.IGNORECASE), "variador", "Danfoss", "control de motor"),
+    (re.compile(r"\b(ACS[0-9A-Z-]{2,})\b", re.IGNORECASE), "variador", "ABB", "control de motor"),
+    (re.compile(r"\b(GV2[A-Z0-9-]+)\b", re.IGNORECASE), "guardamotor", "Schneider Electric", "protección de motor"),
+)
+
+def _best_term_for_model(db: Session, page_id: int, model: str):
+    wanted = normalize_term(model)
+    rows = (
+        db.query(models.PageSearchTerm)
+        .filter(models.PageSearchTerm.document_page_id == page_id)
+        .all()
+    )
+    exact = []
+    contextual = []
+    for term in rows:
+        values = [term.term or "", term.display_text or "", term.row_text or ""]
+        norms = [normalize_term(v) for v in values]
+        if any(n == wanted for n in norms[:2]):
+            exact.append(term)
+        elif any(wanted and wanted in n for n in norms):
+            contextual.append(term)
+    candidates = exact or contextual
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (0 if t.x is not None and t.y is not None else 1, len(t.row_text or "")))
+    return candidates[0]
+
+def _text_relations_for_motor(source, db: Session):
+    """Detecta equipos de potencia/protección aunque no hayan quedado catalogados como ComponentReference.
+
+    Esto evita que Ver relacionados dependa exclusivamente del catálogo: si el plano de un motor
+    contiene un 3RW/3RV/variador, se devuelve como relación verificable desde el propio texto indexado.
+    """
+    page = source.document_page
+    if not page:
+        return []
+    source_ref = normalize_term(source.reference)
+    doc_id = page.document_id
+    # Página actual primero y una página a cada lado como respaldo para circuitos partidos.
+    pages = (
+        db.query(models.DocumentPage)
+        .filter(models.DocumentPage.document_id == doc_id)
+        .filter(models.DocumentPage.page_number >= max(1, page.page_number - 1))
+        .filter(models.DocumentPage.page_number <= page.page_number + 1)
+        .order_by(models.DocumentPage.page_number.asc())
+        .all()
+    )
+    found = []
+    seen = set()
+    for candidate_page in pages:
+        text = candidate_page.text_content or ""
+        if not text:
+            continue
+        upper = text.upper()
+        # Si es página vecina, exigimos que también aparezca la referencia del motor.
+        if candidate_page.id != page.id and source_ref not in normalize_term(text):
+            continue
+        for pattern, ctype, manufacturer, relation in TEXT_DEVICE_RULES:
+            for match in pattern.finditer(upper):
+                model = match.group(1).strip().replace(" ", "-")
+                key = (ctype, normalize_term(model), candidate_page.id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                term = _best_term_for_model(db, candidate_page.id, model)
+                row_text = (term.row_text if term else "") or ""
+                evidence = f"{model} {row_text} {upper[max(0, match.start()-180):match.end()+180]}"
+                # Refuerza la certeza cuando el texto declara explícitamente Softstarter/variador/guardamotor.
+                confidence = 88
+                if ctype == "arrancador suave" and re.search(r"SOFTSTART|ARRANCADOR\s+SUAVE|SANFTSTART", evidence, re.IGNORECASE):
+                    confidence = 98
+                elif ctype == "variador" and re.search(r"VARIADOR|INVERTER|FREQUEN", evidence, re.IGNORECASE):
+                    confidence = 96
+                elif ctype == "guardamotor" and re.search(r"GUARDAMOTOR|MOTOR\s+PROTECT", evidence, re.IGNORECASE):
+                    confidence = 96
+                reason = f"{manufacturer} {model} detectado en la misma página del circuito" if candidate_page.id == page.id else f"{manufacturer} {model} detectado en página eléctrica contigua"
+                found.append({
+                    "id": None,
+                    "reference": model,
+                    "component_type": ctype,
+                    "model": model,
+                    "manufacturer": manufacturer,
+                    "description": row_text,
+                    "distance": None,
+                    "confidence": confidence,
+                    "relation": relation,
+                    "reason": reason,
+                    "x": term.x if term else None,
+                    "y": term.y if term else None,
+                    "width": term.width if term else None,
+                    "height": term.height if term else None,
+                    "page_id": candidate_page.id,
+                    "page_number": candidate_page.page_number,
+                    "document_id": candidate_page.document_id,
+                })
+    found.sort(key=lambda item: _relation_priority("motor", item["component_type"], item["confidence"]))
+    return found
+
+def _merge_relations(primary, extra):
+    merged = []
+    seen = set()
+    for item in list(primary) + list(extra):
+        key = (normalize_term(item.get("reference")), item.get("component_type"), item.get("page_number"))
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
 GENERIC_RELATED = {
     "N", "PE", "L", "L1", "L2", "L3", "L+", "L-", "M", "0V", "24V", "+24V",
     "U", "V", "W", "U1", "V1", "W1", "13", "14", "21", "22",
@@ -146,6 +262,8 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
                 "page_number": ref.document_page.page_number if ref.document_page else None,
                 "document_id": ref.document_page.document_id if ref.document_page else None,
             })
+        if source_type == "motor":
+            relations = _merge_relations(relations, _text_relations_for_motor(source, db))
         relations.sort(key=lambda item: _relation_priority(source_type, item["component_type"], item["confidence"]))
         return {
             "source": {
@@ -155,9 +273,9 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
                 "document_id": doc.id, "document_title": doc.title,
                 "page_number": page.page_number,
             },
-            "relations": relations,
+            "relations": relations[:20],
             "indexed": True,
-            "note": "Relaciones precalculadas durante la indexación; la consulta no vuelve a analizar el PDF.",
+            "note": "Relaciones verificables obtenidas del índice y del texto eléctrico de la página. Para motores se priorizan arrancador suave, variador, guardamotor y maniobra/protección.",
         }
     refs = (
         db.query(models.ComponentReference)
@@ -210,7 +328,9 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
             "x": ref.x, "y": ref.y, "width": ref.width, "height": ref.height,
         })
 
-    relations.sort(key=lambda item: (_relation_priority(source_type, item["component_type"], item["confidence"]), item["distance"] if item["distance"] is not None else 999999))
+    if source_type == "motor":
+        relations = _merge_relations(relations, _text_relations_for_motor(source, db))
+    relations.sort(key=lambda item: (_relation_priority(source_type, item["component_type"], item["confidence"]), item["distance"] if item.get("distance") is not None else 999999))
     doc = page.document
     return {
         "source": {
@@ -224,7 +344,7 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
             "page_number": page.page_number,
         },
         "relations": relations[:20],
-        "note": "Relaciones preliminares inferidas por referencias cruzadas y proximidad en la misma página. Deben verificarse en el plano.",
+        "note": "Relaciones obtenidas por referencias cruzadas, proximidad y reconocimiento de equipos de potencia/protección en el texto del plano.",
     }
 
 

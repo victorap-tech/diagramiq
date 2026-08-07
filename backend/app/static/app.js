@@ -2141,7 +2141,7 @@ function openComponentLocation(item) {
 function openComponentInSearch(item) {
     document.querySelector('[data-section="searchSection"]')?.click();
     elements.searchInput.value = item.reference || item.model || '';
-    // v0.14.7: una relación devuelta por el backend no siempre trae scope.
+    // v0.14.8: una relación devuelta por el backend no siempre trae scope.
     // En ese caso NO borrar los selectores actuales: conserva el sector de la consulta.
     const organizationId = item.organization_id || elements.searchOrganization?.value || '';
     const plantId = item.plant_id || elements.searchPlant?.value || '';
@@ -2441,7 +2441,7 @@ async function showComponentRelations(item) {
             if (rel.document_id && rel.page_number) {
                 dialog.dataset.reopenAfterViewer = '1';
                 dialog.close();
-                openViewer({
+                const exactRelationResult = {
                     document_id: rel.document_id,
                     title: response.source?.document_title || '',
                     page_id: rel.page_id || null,
@@ -2455,7 +2455,10 @@ async function showComponentRelations(item) {
                         ? {x: rel.x, y: rel.y, width: rel.width, height: rel.height}
                         : null,
                     image_path: `/documents/${rel.document_id}/pages/${rel.page_number}/image`,
-                }, null);
+                };
+                // Una relación exacta abierta desde el modal debe mostrar 1 de 1, no 0 de 0.
+                state.search.results = [exactRelationResult];
+                openViewer(exactRelationResult, 0);
                 return;
             }
             dialog.close();
