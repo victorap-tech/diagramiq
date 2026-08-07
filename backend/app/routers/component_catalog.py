@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import models
@@ -362,10 +363,24 @@ def official_component_links(manufacturer: str | None, model: str | None) -> dic
 
 
 def infer_type(reference: str, detected: str | None, component_type: str | None, model: str | None = None, description: str | None = None) -> str:
+    # La evidencia física del plano manda sobre un modelo cercano. En páginas densas
+    # puede aparecer un 6ES7/3RV de otro equipo junto al TAG buscado; antes eso podía
+    # convertir un motor real en "módulo PLC".
+    context = " ".join(filter(None, (detected, component_type, description))).strip().lower()
+    upper_context = context.upper()
+    motor_electrical = sum(bool(re.search(pattern, upper_context, re.IGNORECASE)) for pattern in (
+        r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b",
+        r"\b\d+(?:[.,]\d+)?\s*(?:V|VAC|VDC|VCA)\b",
+        r"\b\d+(?:[.,]\d+)?\s*A\b",
+        r"\b\d{2,5}\s*(?:RPM|R/MIN)\b",
+    ))
+    motor_words = bool(re.search(r"\b(?:MOTOR|REDLER|TRANSPORTADOR|BOMBA|VENTILADOR|CINTA|SINFIN|SINFÍN)\b", upper_context))
+    if "motor" in context or (motor_words and motor_electrical >= 1) or motor_electrical >= 3:
+        return "motor"
+
     model_type = _model_type(model)
     if model_type:
         return model_type
-    context = " ".join(filter(None, (detected, component_type, description))).strip().lower()
     for keyword, label in (
         ("guardamotor", "guardamotor"),
         ("protector de motor", "guardamotor"),
@@ -398,6 +413,19 @@ def normalize_term(value: str | None) -> str:
     text = re.sub(r"\s+", "", text)
     # Conserva letras y números; elimina separadores de plano.
     return re.sub(r"[^A-Z0-9]", "", text)
+
+
+def reference_aliases(value: str | None) -> set[str]:
+    """Variantes equivalentes de un TAG entre EPLAN/HMI."""
+    raw = (value or "").upper().strip().lstrip("=-")
+    if not raw:
+        return set()
+    parts = [part for part in re.split(r"[_.\-/]+", raw) if part]
+    aliases = {raw}
+    if len(parts) >= 2:
+        aliases.update({sep.join(parts) for sep in ("-", "_", ".", "/")})
+        aliases.add("".join(parts))
+    return {alias for alias in aliases if alias}
 
 
 RELIABLE_MODEL_RE = re.compile(
@@ -488,6 +516,35 @@ def _base_query(
     return query
 
 
+
+
+def _reference_motor_evidence_score(reference: str, page_text: str | None) -> int:
+    """Puntúa si esta página representa físicamente al motor buscado.
+
+    Se usa al consolidar la Biblioteca para que un modelo 6ES7 cercano no
+    convierta un motor real en módulo PLC.
+    """
+    text = (page_text or "").upper()
+    if not text or not reference:
+        return 0
+    score = 0
+    power = bool(re.search(r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b", text))
+    voltage = bool(re.search(r"\b(?:220|230|380|400|415|440|460|480)\s*V(?:AC|CA)?\b", text))
+    current = bool(re.search(r"\b\d+(?:[.,]\d+)?\s*A\b", text))
+    speed = bool(re.search(r"\b\d{2,5}\s*(?:RPM|R/MIN)\b", text))
+    terminals = all(token in text for token in ("U1", "V1", "W1"))
+    motor_words = bool(re.search(r"\b(?:MOTOR|CINTA|TRANSPORTADOR|REDLER|BOMBA|VENTILADOR|SINFIN|SINFÍN)\b", text))
+    if power: score += 30
+    if voltage: score += 15
+    if current: score += 15
+    if speed: score += 25
+    if terminals: score += 45
+    if motor_words: score += 35
+    aliases = reference_aliases(reference)
+    if any(re.search(re.escape(alias.upper()) + r"\s*[-:–]\s*[^\n]{0,90}(?:CINTA|TRANSPORT|REDLER|BOMBA|VENTILADOR|MOTOR)", text) for alias in aliases):
+        score += 70
+    return score
+
 def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str, Any]:
     ref, page, doc, sector, plant, org = row
     reference = ref.reference or ""
@@ -510,8 +567,20 @@ def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str,
         elif search_normalized and search_normalized in normalize_term(row_text):
             match_rank, match_reason = 4, "Mencionado en la descripción"
 
+    # Evalúa el contexto local de cada aparición. Una página con datos de motor
+    # (kW/CV, A, RPM, U1/V1/W1, función transportador/redler, etc.) tiene más valor
+    # que una referencia cruzada que casualmente esté cerca de un módulo PLC.
+    local_context = _context_around_reference(page.text_content, reference, radius=650)
+    motor_evidence_score = _reference_motor_evidence_score(reference, page.text_content)
+    physical_evidence_type = "motor" if motor_evidence_score >= 80 else _infer_physical_type_from_page(reference, local_context)
+    description_for_type = " ".join(filter(None, (local_context, ref.description, row_text)))
+    component_type = physical_evidence_type or infer_type(
+        reference, ref.detected_type, ref.component_type, model, description_for_type
+    )
+    if physical_evidence_type == "motor" and _model_type(model) in {"módulo PLC", "PLC", "módulo de entradas", "módulo de salidas", "módulo analógico"}:
+        # Modelo espurio de otro equipo de la misma página: no contaminar la ficha.
+        model = ""
     manufacturer = infer_manufacturer(model, getattr(ref, "manufacturer", None))
-    component_type = infer_type(reference, ref.detected_type, ref.component_type, model, ref.description or row_text)
     links = official_component_links(manufacturer, model)
 
     return {
@@ -538,6 +607,9 @@ def _row_to_item(row: tuple[Any, ...], search_normalized: str = "") -> dict[str,
         "sector_id": sector.id, "sector_name": sector.name,
         "match_rank": match_rank,
         "match_reason": match_reason,
+        "physical_evidence_type": physical_evidence_type,
+        "physical_evidence_score": motor_evidence_score,
+        "local_context": local_context,
     }
 
 
@@ -649,7 +721,7 @@ def _sync_catalog_from_page_index(
         .join(models.Sector, models.Document.sector_id == models.Sector.id)
         .join(models.Plant, models.Sector.plant_id == models.Plant.id)
         .join(models.Organization, models.Plant.organization_id == models.Organization.id)
-        .filter(models.DocumentPage.text_content.ilike(f"%{reference}%"))
+        .filter(or_(*[models.DocumentPage.text_content.ilike(f"%{alias}%") for alias in reference_aliases(reference)]))
     )
     if organization_id is not None:
         query = query.filter(models.Organization.id == organization_id)
@@ -659,15 +731,21 @@ def _sync_catalog_from_page_index(
         query = query.filter(models.Sector.id == sector_id)
 
     created = 0
+    aliases = sorted(reference_aliases(reference), key=len, reverse=True)
     for page, document, sector, plant, organization in query.limit(50).all():
-        context = _context_around_reference(page.text_content, reference)
+        page_text = page.text_content or ""
+        matched_reference = next((alias for alias in aliases if alias.lower() in page_text.lower()), reference)
+        context = _context_around_reference(page_text, matched_reference)
         physical_type = _infer_physical_type_from_page(reference, context)
         if not physical_type:
             continue
         duplicate = (
             db.query(models.ComponentReference.id)
             .filter(models.ComponentReference.document_page_id == page.id)
-            .filter(models.ComponentReference.normalized_reference == normalized)
+            .filter(or_(
+                models.ComponentReference.normalized_reference.in_(aliases),
+                models.ComponentReference.reference.in_(aliases),
+            ))
             .first()
         )
         if duplicate:
@@ -724,16 +802,24 @@ def _filtered_items(
     # Reduce candidatos en SQL, pero la prioridad final se calcula normalizada en Python.
     if q and q.strip():
         raw = q.strip()
-        term = f"%{raw}%"
-        normalized_term = f"%{search_normalized}%"
-        query = query.filter(
-            models.ComponentReference.reference.ilike(term)
-            | models.ComponentReference.reference.ilike(normalized_term)
-            | models.ComponentReference.model.ilike(term)
-            | models.ComponentReference.model.ilike(normalized_term)
-            | models.ComponentReference.row_text.ilike(term)
-            | models.ComponentReference.normalized_reference.ilike(normalized_term)
-        )
+        aliases = reference_aliases(raw) or {raw}
+        filters = []
+        for alias in aliases:
+            term = f"%{alias}%"
+            filters.extend([
+                models.ComponentReference.reference.ilike(term),
+                models.ComponentReference.normalized_reference.ilike(term),
+                models.ComponentReference.model.ilike(term),
+                models.ComponentReference.row_text.ilike(term),
+            ])
+        # También conserva la búsqueda compacta por modelo.
+        if search_normalized:
+            normalized_term = f"%{search_normalized}%"
+            filters.extend([
+                models.ComponentReference.model.ilike(normalized_term),
+                models.ComponentReference.normalized_reference.ilike(normalized_term),
+            ])
+        query = query.filter(or_(*filters))
 
     rows = query.order_by(
         models.ComponentReference.reference.asc(),
@@ -787,15 +873,21 @@ def list_components(
     grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
     occurrences: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
 
-    def quality(item: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
+    def quality(item: dict[str, Any]) -> tuple[int, int, int, int, int, int, int, int]:
         source = (item.get("source_kind") or "").lower()
         model = item.get("model") or ""
+        physical = item.get("physical_evidence_type") or ""
+        local_context = item.get("local_context") or ""
+        # Primero la evidencia física inequívoca. Esto evita que una página de PLC
+        # con un modelo 6ES7 gane sobre la página donde el TAG está dibujado como motor.
         return (
+            int(item.get("physical_evidence_score") or 0),
+            2 if physical == "motor" else (1 if physical else 0),
+            1 if source in {"schematic", "plan", "catalog+plan", "plan-derived"} else 0,
             1 if _is_reliable_model(model) else 0,
-            1 if source in {"schematic", "plan", "catalog+plan"} else 0,
-            1 if item.get("manufacturer") else 0,
             int(item.get("catalog_confidence") or 0),
-            _description_score(item.get("description")),
+            _description_score(local_context or item.get("description")),
+            1 if item.get("manufacturer") else 0,
             1 if item.get("x") is not None and item.get("y") is not None else 0,
         )
 
@@ -818,12 +910,21 @@ def list_components(
         item["page_count"] = len(pages)
         item["occurrence_pages"] = pages[:50]
         # Completa tipo y fabricante después de recuperar el mejor modelo de plano.
+        if item.get("physical_evidence_type"):
+            item["component_type"] = item["physical_evidence_type"]
+            if item["component_type"] == "motor" and _model_type(item.get("model") or "") in {"módulo PLC", "PLC", "módulo de entradas", "módulo de salidas", "módulo analógico"}:
+                item["model"] = ""
+                item["manufacturer"] = ""
+        else:
+            item["component_type"] = infer_type(
+                item.get("reference") or "", item.get("component_type"), item.get("component_type"),
+                item.get("model"), " ".join(filter(None, (item.get("local_context"), item.get("description")))),
+            )
         item["manufacturer"] = infer_manufacturer(item.get("model"), item.get("manufacturer"))
-        item["component_type"] = infer_type(
-            item.get("reference") or "", item.get("component_type"), item.get("component_type"),
-            item.get("model"), item.get("description"),
-        )
         item.update(official_component_links(item.get("manufacturer"), item.get("model")))
+        item.pop("local_context", None)
+        item.pop("physical_evidence_type", None)
+        item.pop("physical_evidence_score", None)
         consolidated.append(item)
 
     # Para direcciones PLC (Q5050.0, I123.4, QW5260, etc.) no se muestra

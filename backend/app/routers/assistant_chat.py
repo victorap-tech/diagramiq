@@ -139,6 +139,19 @@ def _keywords(question: str) -> list[str]:
     return result[:8]
 
 
+def _reference_aliases(value: str) -> set[str]:
+    """Equivale guion medio, bajo, punto y slash en TAGs de plano/HMI."""
+    normalized = normalize_reference(value or "")
+    if not normalized:
+        return set()
+    parts = [part for part in re.split(r"[_.\-/]+", normalized) if part]
+    aliases = {normalized}
+    if len(parts) >= 2:
+        aliases.update({sep.join(parts) for sep in ("-", "_", ".", "/")})
+        aliases.add("".join(parts))
+    return aliases
+
+
 def _base_page_query(db: Session, organization_id: int | None, plant_id: int | None, sector_id: int | None):
     query = (
         db.query(models.DocumentPage, models.Document, models.Sector, models.Plant, models.Organization)
@@ -159,6 +172,7 @@ def _base_page_query(db: Session, organization_id: int | None, plant_id: int | N
 def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict], list[str]]:
     references = [normalize_reference(ref) for ref in extract_references(payload.question)]
     references = list(dict.fromkeys(ref for ref in references if ref))[:6]
+    lookup_references = sorted({alias for ref in references for alias in _reference_aliases(ref)})
     snippets: list[dict] = []
     seen_pages: set[int] = set()
 
@@ -238,8 +252,8 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
             ref_query = ref_query.filter(models.Sector.id == payload.sector_id)
         ref_query = ref_query.filter(
             or_(
-                models.ComponentReference.normalized_reference.in_(references),
-                models.ComponentReference.reference.in_(references),
+                models.ComponentReference.normalized_reference.in_(lookup_references or references),
+                models.ComponentReference.reference.in_(lookup_references or references),
             )
         )
         for ref, page, doc, sector, plant, org in ref_query.limit(12).all():
@@ -273,7 +287,11 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
 
     terms = _keywords(payload.question)
     if terms and len(snippets) < 8:
-        filters = [models.DocumentPage.text_content.ilike(f"%{term}%") for term in terms]
+        search_terms = list(terms)
+        for ref in references:
+            search_terms.extend(sorted(_reference_aliases(ref)))
+        search_terms = list(dict.fromkeys(term for term in search_terms if term))
+        filters = [models.DocumentPage.text_content.ilike(f"%{term}%") for term in search_terms]
         page_query = _base_page_query(db, payload.organization_id, payload.plant_id, payload.sector_id)
         page_query = page_query.filter(or_(*filters))
         for page, doc, sector, plant, org in page_query.limit(12).all():

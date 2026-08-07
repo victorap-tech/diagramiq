@@ -29,7 +29,11 @@ REFERENCE_PATTERN = re.compile(
     # Potenciales y nombres de conductores: 401_A1+, 24VDC+, L1, N, PE.
     r"\d{2,}[A-Z0-9]*(?:_[A-Z0-9]+)+(?:[+-])?|"
     r"(?:24VDC|24VAC|230VAC|400VAC)[+-]?|"
-    r"(?:L[123]|N|PE)"
+    r"(?:L[123]|N|PE)|"
+    # TAGs industriales genéricos con separadores, por ejemplo TC-7002-1,
+    # RT_6502_1 o MA.001. Esto cubre referencias de HMI/EPLAN fuera de los
+    # prefijos IEC conocidos sin aceptar fechas o números puros.
+    r"[A-Z]{1,8}[A-Z0-9]*(?:[_./-][A-Z0-9]+)+"
     r")(?![A-Z0-9])",
     re.IGNORECASE,
 )

@@ -1240,7 +1240,10 @@ function normalizeImageUrl(imageUrl) {
 
 
 function getResultCoordinates(result) {
+    // Para el rectángulo amarillo usamos primero las coordenadas exactas del TAG.
+    // `coordinates` puede venir ampliado para centrar la zona física del equipo.
     const coordinates =
+        result?.label_coordinates ??
         result?.coordinates ??
         result?.bounding_box ??
         result?.bbox ??

@@ -56,6 +56,10 @@ def reference_variants(value: str) -> set[str]:
         parts = [part for part in re.split(r"[_.\-/]+", normalized) if part]
         if len(parts) >= 2:
             variants.update({sep.join(parts) for sep in ("_", "-", ".", "/")})
+            variants.add("".join(parts))
+    canonical = canonical_reference(normalized)
+    if canonical:
+        variants.add(canonical)
     return {item for item in variants if item}
 
 
@@ -70,6 +74,65 @@ def reference_family(reference: str) -> str:
         return match.group(1)
     return value.split(".", 1)[0]
 
+
+
+
+def physical_component_evidence(page_text: str, reference: str) -> tuple[int, list[str], str | None]:
+    """Puntúa evidencia física del equipo en la página, independiente de IA.
+
+    Da prioridad a páginas donde el TAG está acompañado por datos eléctricos,
+    bornes de motor y una descripción funcional. Penaliza páginas densas de PLC/HMI.
+    """
+    text = (page_text or "").upper()
+    ref = normalize_reference(reference).upper()
+    if not text or not ref:
+        return 0, [], None
+
+    score = 0
+    reasons: list[str] = []
+    inferred: str | None = None
+
+    # Datos típicos de motor/carga.
+    power = bool(re.search(r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b", text))
+    voltage = bool(re.search(r"\b(?:220|230|380|400|415|440|460|480)\s*V(?:AC|CA)?\b", text))
+    current = bool(re.search(r"\b\d+(?:[.,]\d+)?\s*A\b", text))
+    speed = bool(re.search(r"\b\d{2,5}\s*(?:RPM|R/MIN)\b", text))
+    terminals = all(token in text for token in ("U1", "V1", "W1"))
+    motor_words = bool(re.search(r"\b(?:MOTOR|CINTA|TRANSPORTADOR|REDLER|BOMBA|VENTILADOR|SINFIN|SINFÍN)\b", text))
+    motor_symbol_text = bool(re.search(r"(?:M\s*3\s*[~∼]|3\s*[~∼])", text))
+
+    electrical_count = sum((power, voltage, current, speed))
+    if power:
+        score += 34; reasons.append("potencia_motor")
+    if voltage:
+        score += 18; reasons.append("tension_motor")
+    if current:
+        score += 18; reasons.append("corriente_motor")
+    if speed:
+        score += 28; reasons.append("rpm_motor")
+    if terminals:
+        score += 44; reasons.append("bornes_u1_v1_w1")
+    if motor_words:
+        score += 38; reasons.append("funcion_mecanica")
+    if motor_symbol_text:
+        score += 28; reasons.append("simbolo_motor")
+
+    # Descripción explícita TAG - función.
+    aliases = reference_variants(reference)
+    if any(re.search(re.escape(alias.upper()) + r"\s*[-:–]\s*[^\n]{0,80}(?:CINTA|TRANSPORT|REDLER|BOMBA|VENTILADOR|MOTOR)", text) for alias in aliases):
+        score += 65; reasons.append("descripcion_tag_funcion")
+
+    if (terminals and electrical_count >= 1) or (motor_words and electrical_count >= 2) or score >= 95:
+        inferred = "Motor"
+
+    # Página de PLC/listado: sólo penaliza si no hay evidencia física fuerte.
+    plc_dense = len(re.findall(r"\b(?:DI|DO|DQ|AI|AO|I|Q)\d+(?:[_.]\d+)?\b", text))
+    if inferred is None and plc_dense >= 8:
+        score -= min(80, plc_dense * 5); reasons.append("pagina_plc_densa")
+    if inferred is None and any(k in text for k in ("LISTA DE SEÑALES", "LISTA DE SENALES", "I/O LIST", "EINGANG", "AUSGANG")):
+        score -= 45; reasons.append("lista_senales")
+
+    return score, reasons, inferred
 
 def score_reference_result(item: models.ComponentReference, searched_reference: str) -> tuple[int, dict]:
     """Prioriza páginas de esquema/componente y deja tablas/listados al final."""
@@ -153,10 +216,17 @@ def score_reference_result(item: models.ComponentReference, searched_reference: 
     if 0 < area < 12000:
         score += 3
 
+    physical_score, physical_reasons, physical_type = physical_component_evidence(page_text, searched_reference)
+    score += physical_score
+    reasons.extend(physical_reasons)
+    if physical_type:
+        reasons.append("equipo_fisico_prioritario")
+
     return score, {
         "score": score,
         "page_kind": "component" if score >= 105 else ("list" if score < 70 else "possible_component"),
         "ranking_reasons": reasons,
+        "physical_type": physical_type,
     }
 
 
@@ -212,10 +282,15 @@ def score_term_result(item: models.PageSearchTerm, searched_text: str) -> tuple[
     if len(row_refs) >= 5:
         score -= 18
 
+    physical_score, physical_reasons, physical_type = physical_component_evidence(page_text, searched_text)
+    score += physical_score
+    reasons.extend(physical_reasons)
+
     return score, {
         "score": score,
         "page_kind": "component" if score >= 105 else ("list" if score < 70 else "possible_component"),
         "ranking_reasons": reasons,
+        "physical_type": physical_type,
     }
 
 
@@ -389,7 +464,7 @@ def serialize_reference(item: models.ComponentReference, query: str, ranking: di
         "match_type": "reference",
         "reference": item.reference,
         "normalized_reference": item.normalized_reference or normalize_reference(item.reference),
-        "component_type": item.detected_type or item.component_type,
+        "component_type": (ranking or {}).get("physical_type") or item.detected_type or item.component_type,
         "fragment": item.row_text or build_fragment(page.text_content, item.reference),
         "coordinates": expanded_component_coordinates(item, ranking or {}),
         "label_coordinates": {"x": item.x, "y": item.y, "width": item.width, "height": item.height},
@@ -422,6 +497,82 @@ def with_relations(query):
         .joinedload(models.Document.sector)
         .joinedload(models.Sector.plant)
     )
+
+
+def _page_text_fallback(
+    db: Session,
+    reference: str,
+    clean_query: str,
+    sector_id: int | None,
+    document_id: int | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict], int]:
+    """Última red de seguridad: busca el TAG directamente en texto ya indexado.
+
+    No abre el PDF y no depende de que el clasificador haya creado correctamente
+    un ComponentReference. Es importante para TAGs de fabricante/HMI como
+    TC-7002-1, RT_6502_1, etc.
+    """
+    variants = sorted(reference_variants(reference), key=len, reverse=True)
+    filters = [models.DocumentPage.text_content.ilike(f"%{variant}%") for variant in variants]
+    if not filters:
+        return [], 0
+    query = (
+        db.query(models.DocumentPage)
+        .options(
+            joinedload(models.DocumentPage.document)
+            .joinedload(models.Document.sector)
+            .joinedload(models.Sector.plant)
+        )
+        .join(models.Document)
+        .filter(or_(*filters))
+    )
+    if sector_id is not None:
+        query = query.filter(models.Document.sector_id == sector_id)
+    if document_id is not None:
+        query = query.filter(models.Document.id == document_id)
+    pages = query.order_by(models.Document.id, models.DocumentPage.page_number).all()
+    total = len(pages)
+    results: list[dict] = []
+    for page in pages[offset: offset + limit]:
+        text = page.text_content or ""
+        matched_variant = next((v for v in variants if v.lower() in text.lower()), reference)
+        fragment = build_fragment(text, matched_variant, before=180, after=320)
+        context = analyze_context_text(fragment, reference)
+        upper = fragment.upper()
+        electrical = sum(bool(re.search(pattern, upper, re.IGNORECASE)) for pattern in (
+            r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b",
+            r"\b\d+(?:[.,]\d+)?\s*(?:V|VAC|VDC|VCA)\b",
+            r"\b\d+(?:[.,]\d+)?\s*A\b",
+            r"\b\d{2,5}\s*(?:RPM|R/MIN)\b",
+        ))
+        motor_words = bool(re.search(r"\b(?:MOTOR|REDLER|TRANSPORTADOR|CINTA|BOMBA|VENTILADOR|SINFIN|SINFÍN)\b", upper))
+        motor_terminals = all(token in upper for token in ("U1", "V1", "W1"))
+        inferred_type = context.get("detected_type")
+        score = 70
+        reasons = ["texto_indexado_directo"]
+        if (motor_words and electrical >= 1) or motor_terminals or electrical >= 3:
+            inferred_type = "Motor"
+            score = 180
+            reasons.extend(["evidencia_motor", "pagina_fisica_prioritaria"])
+        result = base_result(page, clean_query)
+        context["detected_type"] = inferred_type
+        result.update({
+            "match_type": "indexed_page_text",
+            "reference": reference,
+            "normalized_reference": normalize_reference(reference),
+            "component_type": inferred_type,
+            "fragment": fragment,
+            "coordinates": None,
+            "context": context,
+            "score": score,
+            "page_kind": "component" if score >= 150 else "possible_component",
+            "ranking_reasons": reasons,
+            "result_role": "fallback",
+        })
+        results.append(result)
+    return results, total
 
 
 @router.get("")
@@ -488,6 +639,23 @@ def search_documents(
             serialized = serialize_reference(item, clean_query, ranking)
             serialized.update(ranking)
             results.append(serialized)
+
+        # Siempre contrastar con el texto persistido de páginas. Así una aparición
+        # física que el clasificador viejo omitió (por ejemplo TC-7002-1 como motor)
+        # puede ganar sobre una mención cruzada cerca de un PLC.
+        fallback_results, _fallback_total = _page_text_fallback(
+            db, primary_reference, clean_query, sector_id, document_id, max(limit, 100), 0
+        )
+        combined: dict[tuple[int | None, int | None], dict] = {}
+        for row in results + fallback_results:
+            key = (row.get("document_id"), row.get("page_id"))
+            current = combined.get(key)
+            if current is None or int(row.get("score") or 0) > int(current.get("score") or 0):
+                combined[key] = row
+        merged = list(combined.values())
+        merged.sort(key=lambda row: (-int(row.get("score") or 0), int(row.get("page_number") or 0)))
+        total = len(merged)
+        results = merged[offset: offset + limit]
     else:
         # Para frases se usa la palabra más específica/larga como acceso al índice.
         tokens = [normalize_search_term(x) for x in re.split(r"\s+", clean_query)]
