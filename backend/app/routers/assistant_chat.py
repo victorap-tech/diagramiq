@@ -345,6 +345,22 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             "No encontré contexto suficiente en los documentos seleccionados. Probá incluir una referencia exacta, modelo o alarma.",
         )
 
+    # v0.14.6: si la referencia vino de un fallback de texto, recuperar las
+    # coordenadas exactas del TAG desde PageSearchTerm para que el visor pueda
+    # dibujar el resaltado amarillo aun cuando ComponentReference no tenga bbox.
+    for item in snippets:
+        if item.get("reference") and item.get("page_id") and item.get("x") is None:
+            aliases = _reference_aliases(item.get("reference"))
+            term = (
+                db.query(models.PageSearchTerm)
+                .filter(models.PageSearchTerm.document_page_id == item.get("page_id"))
+                .filter(models.PageSearchTerm.term.in_(aliases))
+                .first()
+            ) if aliases else None
+            if term is not None:
+                item["x"], item["y"] = term.x, term.y
+                item["width"], item["height"] = term.width, term.height
+
     context_blocks: list[str] = []
     sources: list[dict] = []
     for index, item in enumerate(snippets, start=1):
@@ -426,14 +442,27 @@ CONTEXTO INDEXADO:
         and not _is_ambiguous_component_reference(item.get("reference"))
         and (item.get("type") or item.get("model") or item.get("manufacturer") or item.get("description"))
     ]
+    def _physical_evidence_score(item):
+        text = " ".join(filter(None, [item.get("description"), item.get("text")])).upper()
+        score = 0
+        # Una aparición con datos de placa de motor debe ganar a una mención del
+        # mismo TAG dentro de una lista de entradas/sensores del PLC.
+        if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:KW|CV|HP)\b", text): score += 35
+        if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:V|VAC|VDC|VCA)\b", text): score += 15
+        if re.search(r"\b\d+(?:[.,]\d+)?\s*A\b", text): score += 15
+        if re.search(r"\b\d{2,5}\s*(?:RPM|R/MIN)\b", text): score += 25
+        if re.search(r"\b(?:MOTOR|CINTA|TRANSPORTADOR|BOMBA|VENTILADOR|SINFIN|SINFÍN)\b", text): score += 20
+        if re.search(r"\b(?:SENSOR|ENTRADAS? DIGITALES?|\bDI\d*)\b", text) and score < 40: score -= 15
+        return score
+
     component_candidates.sort(
         key=lambda item: (
             1 if normalize_reference(item.get("reference") or "") in requested_references else 0,
+            _physical_evidence_score(item),
             1 if item.get("is_current_context") else 0,
             1 if item.get("source_kind") == "plan" else 0,
             int(item.get("confidence") or 0),
             1 if item.get("model") else 0,
-            1 if item.get("manufacturer") else 0,
         ),
         reverse=True,
     )
@@ -453,7 +482,7 @@ CONTEXTO INDEXADO:
         resolved_manufacturer = infer_manufacturer(primary.get("model"), primary.get("manufacturer"))
         resolved_type = infer_type(
             primary.get("reference") or "", primary.get("type"), primary.get("type"),
-            primary.get("model"), primary.get("description"),
+            primary.get("model"), " ".join(filter(None, [primary.get("description"), primary.get("text")])),
         )
         official_links = official_component_links(resolved_manufacturer, primary.get("model"))
         component_card = {

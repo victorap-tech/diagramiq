@@ -1800,7 +1800,7 @@ function renderAiAnswer(response) {
             </div>
             <div class="ai-card-actions">
                 <button type="button" class="primary-button ai-open-source" data-source-index="${Number(card.source_index || 0)}">Ver en plano</button>
-                <button type="button" class="secondary-button ai-search-related" data-component-id="${Number(card.component_id || 0)}" data-reference="${escapeHtml(card.reference || "")}" data-model="${escapeHtml(card.model || "")}">Ver relacionados</button>
+                <button type="button" class="secondary-button ai-search-related" data-component-id="${Number(card.component_id || 0)}" data-reference="${escapeHtml(card.reference || "")}" data-model="${escapeHtml(card.model || "")}" data-organization-id="${escapeHtml(String(card.organization_id || ""))}" data-plant-id="${escapeHtml(String(card.plant_id || ""))}" data-sector-id="${escapeHtml(String(card.sector_id || ""))}">Ver relacionados</button>
                 ${card.manual_url ? `<a class="secondary-button" href="${escapeHtml(card.manual_url)}" target="_blank" rel="noopener noreferrer">Manual oficial</a>` : ''}
                 ${card.product_url ? `<a class="secondary-button" href="${escapeHtml(card.product_url)}" target="_blank" rel="noopener noreferrer">Página oficial</a>` : ''}
             </div>
@@ -1837,7 +1837,12 @@ function renderAiAnswer(response) {
             // Las relaciones pertenecen a la aparición concreta identificada por la IA.
             // Nunca se vuelve a buscar por textos ambiguos como N, PE, M o números de borne.
             if (componentId > 0) {
-                await showComponentRelations({ id: componentId, reference, model });
+                await showComponentRelations({
+                    id: componentId, reference, model,
+                    organization_id: Number(elements.searchOrganization?.value || 0) || null,
+                    plant_id: Number(elements.searchPlant?.value || 0) || null,
+                    sector_id: Number(elements.searchSector?.value || 0) || null,
+                });
                 return;
             }
 
@@ -2136,13 +2141,22 @@ function openComponentLocation(item) {
 function openComponentInSearch(item) {
     document.querySelector('[data-section="searchSection"]')?.click();
     elements.searchInput.value = item.reference || item.model || '';
-    elements.searchOrganization.value = String(item.organization_id || '');
+    // v0.14.6: una relación devuelta por el backend no siempre trae scope.
+    // En ese caso NO borrar los selectores actuales: conserva el sector de la consulta.
+    const organizationId = item.organization_id || elements.searchOrganization?.value || '';
+    const plantId = item.plant_id || elements.searchPlant?.value || '';
+    const sectorId = item.sector_id || elements.searchSector?.value || '';
+    if (!organizationId || !plantId || !sectorId) {
+        elements.searchForm?.requestSubmit();
+        return;
+    }
+    elements.searchOrganization.value = String(organizationId);
     elements.searchOrganization.dispatchEvent(new Event('change'));
     setTimeout(() => {
-        elements.searchPlant.value = String(item.plant_id || '');
+        elements.searchPlant.value = String(plantId);
         elements.searchPlant.dispatchEvent(new Event('change'));
         setTimeout(() => {
-            elements.searchSector.value = String(item.sector_id || '');
+            elements.searchSector.value = String(sectorId);
             elements.searchForm?.requestSubmit();
         }, 350);
     }, 350);
