@@ -673,30 +673,29 @@ def process_pdf_document(
     )
 
     try:
-        remove_existing_pages(
-            document=document,
-            db=db,
-        )
-
+        # Preflight completo antes de borrar el índice anterior. Si el PDF no abre
+        # o el catálogo falla, el índice existente permanece disponible.
         pdf = fitz.open(pdf_path)
-        document.page_count = pdf.page_count
-        document.processing_stage = "extracting"
-        document.processing_progress = 3
-        document.processing_message = "Extrayendo texto e indexando páginas"
-        db.commit()
-
         if pdf.page_count <= 0:
             raise ValueError(
                 "El documento PDF no contiene páginas"
             )
 
+        document.page_count = pdf.page_count
         document.processing_stage = "catalog"
         document.processing_progress = 4
-        document.processing_message = "Leyendo listas de componentes"
+        document.processing_message = "Validando PDF y leyendo listas de componentes"
         db.commit()
         component_catalog = build_component_catalog(pdf)
-        document.processing_message = f"Catálogo maestro: {len(component_catalog)} referencias"
+
+        # Solo después de validar el PDF comienza el reemplazo del índice.
+        remove_existing_pages(
+            document=document,
+            db=db,
+        )
+        document.processing_stage = "extracting"
         document.processing_progress = 7
+        document.processing_message = f"PDF validado. Catálogo maestro: {len(component_catalog)} referencias"
         db.commit()
 
         matrix = fitz.Matrix(

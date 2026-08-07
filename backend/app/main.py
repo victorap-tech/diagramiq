@@ -127,10 +127,10 @@ ensure_processing_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.14.2",
+    version="0.14.3",
 )
 
-APP_VERSION = "0.14.2"
+APP_VERSION = "0.14.3"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -173,11 +173,9 @@ app.include_router(component_library.router)
 
 
 @app.on_event("startup")
-def resume_pending_index_jobs() -> None:
-    """Retoma documentos que quedaron en cola cuando Railway redeploya."""
-    started = documents.recover_queued_documents()
-    if started:
-        print(f"[INDEX] Reanudados al iniciar: {started}")
+def deploy_safe_startup() -> None:
+    """Arranque seguro: un deploy nunca inicia ni modifica trabajos de indexación."""
+    print("[DEPLOY-SAFE] Inicio sin reindexación automática; PostgreSQL y Bucket permanecen intactos", flush=True)
 
 # ==========================
 # Frontend

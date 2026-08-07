@@ -1,12 +1,14 @@
-# DiagramIQ v0.14.2
+# DiagramIQ v0.14.3 — Deploy seguro
 
-Corrección de reindexación en Railway.
+Base: v0.14.2.
 
-- El worker se reserva antes de lanzar el hilo para evitar carreras.
-- Los trabajos `pending` se recuperan al iniciar el deploy.
-- Logs `[INDEX]` se imprimen con `flush=True` para verse inmediatamente en Railway.
-- Nuevo endpoint `POST /documents/{id}/retry-now` para forzar un worker sin volver a subir el PDF.
-- Los fallos no eliminan el PDF ni el registro del documento.
-- Mantiene búsqueda y alias de códigos de v0.14.0/v0.14.1.
+## Cambios
+- Un deploy/reinicio de Railway no inicia ni reanuda indexaciones automáticamente.
+- PostgreSQL y el Bucket son la fuente persistente; el contenedor se trata como temporal.
+- Reindexar es una acción manual. Antes de iniciar, DiagramIQ verifica que el PDF original exista y pueda abrirse.
+- Si falta el PDF en el Bucket, la reindexación se rechaza sin tocar el índice existente.
+- Los contadores existentes se conservan mientras el trabajo está en cola y solo cambian cuando el worker realmente comienza.
+- El PDF se valida y se construye el catálogo preliminar antes de borrar páginas del índice anterior.
 
-Deployar normalmente sobre la versión anterior. No hace falta borrar PostgreSQL ni el Bucket.
+## Regla de operación
+Un deploy no debe cambiar el estado de los documentos. Si hace falta reindexar, se realiza explícitamente desde Documentos.

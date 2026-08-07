@@ -892,16 +892,32 @@ def document_progress(document_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
 def reindex_document(document_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Reindexación manual. Antes de tocar el estado valida que el PDF original sea recuperable."""
     document = db.query(models.Document).filter(models.Document.id == document_id).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     if document.processing_status == "processing":
         raise HTTPException(status_code=409, detail="El documento ya se está procesando")
+
+    # Preflight: un PDF faltante/corrupto nunca debe destruir el índice que ya existe.
+    try:
+        source_path = resolve_local_file(document.file_path)
+        if not source_path.exists():
+            raise FileNotFoundError(f"PDF faltante: {source_path}")
+        with fitz.open(source_path) as pdf_check:
+            if pdf_check.page_count <= 0:
+                raise ValueError("El PDF no contiene páginas")
+    except Exception as exc:
+        logger.exception("[INDEX] Preflight falló para documento %s", document.id)
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede reindexar sin el PDF original en el Bucket: {exc}",
+        )
+
     document.processing_status = "pending"
     document.processing_stage = "waiting"
-    document.processing_progress = 0
-    document.processed_pages = 0
-    document.processing_message = "Reindexación en cola"
+    # Conserva los contadores existentes hasta que el worker realmente empiece.
+    document.processing_message = "Reindexación manual en cola (PDF verificado)"
     db.commit()
     started = start_document_worker(document.id)
     if not started:
