@@ -72,12 +72,15 @@ def is_nonphysical_reference(reference: str | None) -> bool:
 
 
 PLC_CHANNEL_RE = re.compile(
-    r"^(?:[IQM](?:[WDB])?\d+(?:\.\d+)?|[AQ](?:[WDB])?\d+(?:\.\d+)?)$",
+    # Direcciones de bit: Q5050.0 / I123.4 / M10.2. Una referencia de plano
+    # como Q401 NO es un canal PLC y debe poder entrar al catálogo físico.
+    r"^(?:[IQM]\d+[._]\d+|(?:I|Q|M|A)[WDB]\d+)$",
     re.IGNORECASE,
 )
 
 def is_plc_channel(value: str | None) -> bool:
-    return bool(PLC_CHANNEL_RE.fullmatch((value or "").strip()))
+    raw = (value or "").strip().upper().replace("_", ".")
+    return bool(PLC_CHANNEL_RE.fullmatch(raw))
 
 def _term_location_payload(term: models.PageSearchTerm, page: models.DocumentPage, document: models.Document) -> dict[str, Any]:
     return {
@@ -627,7 +630,9 @@ PHYSICAL_LIBRARY_TYPES = {
 }
 
 CHANNEL_OR_SUBELEMENT_RE = re.compile(
-    r"^(?:AI|AO|DI|DO|DQ|IQ|Q|I|IW|QW|IB|QB|ID|QD)\d+(?:[_.]\d+)?$",
+    # AI/DI/DO son subelementos por convención. Q/I simples no se excluyen
+    # porque muchos planos industriales usan Q401, Q402... como equipos físicos.
+    r"^(?:AI|AO|DI|DO|DQ|IQ)\d+(?:[_.]\d+)?$",
     re.IGNORECASE,
 )
 
@@ -692,7 +697,7 @@ def _infer_physical_type_from_page(reference: str, context: str) -> str:
         return "motor"
     for pattern, label in (
         (r"\b(?:VARIADOR|FREQUENZUMRICHTER|FREQUENCY CONVERTER|SINAMICS|ALTIVAR|VLT)\b", "variador"),
-        (r"\b(?:GUARDAMOTOR|MOTOR PROTECT(?:OR|ION)?|MOTOR CIRCUIT BREAKER|MPCB|3RV|GV2|MS116|PKZM?|MOTOR STARTER PROTECTOR)\b", "guardamotor"),
+        (r"\b(?:GUARDAMOTOR|DISYUNTOR\s+TERMOMAGN[EÉ]TICO|INTERRUPTOR\s+PROTECTOR\s+DE\s+MOTOR|MOTOR PROTECT(?:OR|ION)?|MOTOR CIRCUIT BREAKER|MPCB|3RV|GV2|MS116|PKZM?|MOTOR STARTER PROTECTOR)\b", "guardamotor"),
         (r"\b(?:CONTACTOR|SCHÜTZ|3RT)\b", "contactor"),
         (r"\b(?:SENSOR|PROXIM|ENCODER)\b", "sensor"),
         (r"\b(?:ELECTROV[ÁA]LVULA|SOLENOID|VALVE|V[ÁA]LVULA)\b", "válvula"),
@@ -843,8 +848,11 @@ def _sync_catalog_from_page_index(
     for page, document, sector, plant, organization in query.limit(50).all():
         page_text = page.text_content or ""
         matched_reference = next((alias for alias in aliases if alias.lower() in page_text.lower()), reference)
-        context = _context_around_reference(page_text, matched_reference)
-        physical_type = _infer_physical_type_from_page(reference, context)
+        context = _context_around_reference(page_text, matched_reference, radius=1200)
+        # La referencia exacta puede estar en una lista de piezas. En ese caso el
+        # modelo (p.ej. 3RV2021...) es evidencia más fuerte que una palabra genérica.
+        model = _best_model_from_page(reference, context or page_text, "")
+        physical_type = _model_type(model) or _infer_physical_type_from_page(reference, context)
         if not physical_type:
             continue
         duplicate = (
@@ -863,6 +871,8 @@ def _sync_catalog_from_page_index(
             normalized_reference=normalized,
             component_type=physical_type,
             detected_type=physical_type,
+            model=model or None,
+            manufacturer=infer_manufacturer(model, None) or None,
             row_text=context,
             description=context,
             source_kind="plan-derived",
@@ -986,7 +996,7 @@ def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False)
     se muestran cuando el plano aporta evidencia técnica suficiente.
     """
     reference = (item.get("reference") or "").strip()
-    if is_nonphysical_reference(reference) or CHANNEL_OR_SUBELEMENT_RE.fullmatch(reference):
+    if is_nonphysical_reference(reference) or is_plc_channel(reference) or CHANNEL_OR_SUBELEMENT_RE.fullmatch(reference):
         return False
     model = (item.get("model") or "").strip()
     component_type = (item.get("component_type") or "").strip()

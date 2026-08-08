@@ -1,6 +1,14 @@
-# DiagramIQ v0.15.6
+# DiagramIQ v0.15.7
 
-## v0.15.6 — Relaciones funcionales de potencia
+## v0.15.7 — Catálogo físico Q/PLC corregido
+
+- Corrige la causa raíz por la que `Q401` no aparecía en Componentes: una referencia `Q` seguida solo por números ya no se interpreta como dirección PLC.
+- Direcciones PLC reales como `Q5050.0`, `I123.4`, `QW5260`, `IW100` siguen tratándose como canales.
+- La recuperación desde el índice textual puede materializar una ficha física usando el modelo cercano (por ejemplo `3RV...` → guardamotor).
+- Reconoce `disyuntor termomagnético` / `interruptor protector de motor` como guardamotor.
+- Mantiene filtros estrictos de empresa/planta/sector, relaciones funcionales y referencia exacta del asistente.
+
+## v0.15.7 — Relaciones funcionales de potencia
 
 `Ver relacionados` conserva el componente consultado como raíz y detecta equipos de accionamiento/protección asociados en el mismo circuito. Se agregó reconocimiento de variadores Siemens SINAMICS por modelo `6SL...`; por ejemplo, desde un guardamotor Q401 puede aparecer el variador IF401-1/6SL... como relacionado sin reemplazar a Q401 como componente principal.
 
@@ -63,7 +71,7 @@ DIAGRAMIQ_AUTH_SECRET=<cadena-aleatoria-larga>
 La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/health`, `/login` y los archivos estáticos son las únicas rutas públicas necesarias. Los endpoints costosos de IA incluyen un límite básico de solicitudes por IP.
 
 
-## v0.15.6 — Aprendizaje de nomenclatura por sector/documento
+## v0.15.7 — Aprendizaje de nomenclatura por sector/documento
 
 - Aprende prefijos locales del plano usando fichas ya confirmadas dentro del mismo sector.
 - Ejemplo: en Caldera1, si una referencia `Q...` confirmada es guardamotor, otras `Q...` del mismo sector pueden clasificarse como guardamotor cuando no haya evidencia contradictoria.
@@ -72,14 +80,14 @@ La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/hea
 - La evidencia local y los modelos de fabricante siempre tienen prioridad sobre una regla aprendida.
 - Si un prefijo tiene usos contradictorios, no se aplica automáticamente salvo que exista una mayoría clara.
 
-## v0.15.6 — Reindexación segura con integridad referencial
+## v0.15.7 — Reindexación segura con integridad referencial
 - Corrige `ForeignKeyViolation` al reindexar documentos ya procesados.
 - La limpieza respeta el orden: conexiones → adjuntos → términos/referencias → páginas.
 - La limpieza de PostgreSQL se ejecuta en una sola transacción con rollback ante error.
 - Los PNG anteriores se eliminan solamente después de confirmar la limpieza en base de datos.
 - Conserva el aprendizaje de nomenclatura por sector/documento de v0.15.3.
 
-## v0.15.6 — Referencia exacta en Asistente + visor 1 de 1
+## v0.15.7 — Referencia exacta en Asistente + visor 1 de 1
 
 - El Asistente reconoce TAGs como `Q401` aunque todavía no tengan ficha consolidada.
 - Si la pregunta contiene una referencia exacta, la tarjeta **Componente identificado** queda anclada a esa referencia y no puede ser sustituida por un variador, motor u otro componente cercano de la misma página.
