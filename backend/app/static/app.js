@@ -157,6 +157,7 @@ const state = {
     sectors: [],
     documents: [],
     componentCatalog: [],
+    componentCatalogRequestId: 0,
 
     search: {
         organizationId: null,
@@ -278,6 +279,7 @@ async function apiRequest(url, options = {}) {
 
     try {
         response = await fetch(url, config);
+        if (response.status === 401) { window.location.href = "/login"; throw new Error("Sesión vencida."); }
     } catch {
         throw new Error("No se pudo conectar con el servidor.");
     }
@@ -2353,7 +2355,7 @@ async function openComponentSheet(item) {
             submit.disabled = true; submit.textContent = 'Subiendo...';
             message.classList.add('hidden');
             try {
-                const response = await fetch(API.componentLibraryUpload(item.id), {method:'POST', body:new FormData(form)});
+                const response = await fetch(API.componentLibraryUpload(item.id), {method:'POST', body:new FormData(form)}); if(response.status===401){window.location.href='/login'; return;}
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.detail || 'No se pudo subir el archivo');
                 await load();
@@ -2479,18 +2481,42 @@ async function showComponentRelations(item) {
 
 async function loadComponentCatalog() {
     if (!elements.componentsList) return;
+    const requestId = ++state.componentCatalogRequestId;
     elements.componentsLoading?.classList.remove('hidden');
     elements.componentsMessage?.classList.add('hidden');
     const params = componentCatalogParams();
+    const requestedSectorId = String(params.get('sector_id') || '');
+    const requestedPlantId = String(params.get('plant_id') || '');
+    const requestedOrganizationId = String(params.get('organization_id') || '');
     try {
         const response = await apiRequest(`${API.componentCatalog}?${params.toString()}`);
-        renderComponentSummary(response.counts);
-        renderComponentCatalog(response.items);
+        // Si el usuario cambió empresa/planta/sector mientras esta petición estaba en vuelo,
+        // descartamos la respuesta vieja para que nunca pise el catálogo actual.
+        if (requestId !== state.componentCatalogRequestId) return;
+        let items = Array.isArray(response.items) ? response.items : [];
+        // Defensa adicional en cliente: el backend ya filtra, pero la UI tampoco renderiza
+        // una ficha que no pertenezca exactamente al alcance visible.
+        items = items.filter((item) => {
+            if (requestedOrganizationId && String(item.organization_id || '') !== requestedOrganizationId) return false;
+            if (requestedPlantId && String(item.plant_id || '') !== requestedPlantId) return false;
+            if (requestedSectorId && String(item.sector_id || '') !== requestedSectorId) return false;
+            return true;
+        });
+        const counts = items.reduce((acc, item) => {
+            const key = item.component_type || 'otro';
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+        renderComponentSummary(counts);
+        renderComponentCatalog(items);
     } catch (error) {
+        if (requestId !== state.componentCatalogRequestId) return;
         elements.componentsList.innerHTML = '';
         showMessage(elements.componentsMessage, error.message, 'error');
     } finally {
-        elements.componentsLoading?.classList.add('hidden');
+        if (requestId === state.componentCatalogRequestId) {
+            elements.componentsLoading?.classList.add('hidden');
+        }
     }
 }
 

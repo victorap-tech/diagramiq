@@ -19,6 +19,12 @@ PAGE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 RENDER_SCALE = 1.5
 
 
+TECHNICAL_DOCUMENT_TYPES = {"manual", "datasheet", "procedimiento", "mantenimiento"}
+
+def is_technical_document(document) -> bool:
+    return (getattr(document, "document_type", None) or "").strip().lower() in TECHNICAL_DOCUMENT_TYPES
+
+
 REFERENCE_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:"
     # Designaciones IEC de componentes. DI/DO/AI/AO deben llevar número
@@ -688,9 +694,17 @@ def process_pdf_document(
         document.page_count = pdf.page_count
         document.processing_stage = "catalog"
         document.processing_progress = 4
-        document.processing_message = "Validando PDF y leyendo listas de componentes"
+        technical_document = is_technical_document(document)
+        document.processing_message = (
+            "Validando e indexando documentación técnica"
+            if technical_document
+            else "Validando PDF y leyendo listas de componentes"
+        )
         db.commit()
-        component_catalog = build_component_catalog(pdf)
+        # Los manuales/datasheets/procedimientos se indexan por texto y página,
+        # pero NO alimentan el catálogo eléctrico ni las relaciones del plano.
+        # Esto mantiene separado el conocimiento documental de la topología eléctrica.
+        component_catalog = {} if technical_document else build_component_catalog(pdf)
 
         # Solo después de validar el PDF comienza el reemplazo del índice.
         remove_existing_pages(
@@ -754,14 +768,16 @@ def process_pdf_document(
             db.add(new_page)
             db.flush()
 
-            component_count = save_page_references(
-                page=page,
-                text_content=text_content,
-                document_page=new_page,
-                db=db,
-                component_catalog=component_catalog,
-                page_type=page_type,
-            )
+            component_count = 0
+            if not technical_document:
+                component_count = save_page_references(
+                    page=page,
+                    text_content=text_content,
+                    document_page=new_page,
+                    db=db,
+                    component_catalog=component_catalog,
+                    page_type=page_type,
+                )
             term_count = save_page_search_terms(
                 page=page,
                 document_page=new_page,
@@ -784,21 +800,28 @@ def process_pdf_document(
         document.processing_status = "processing"
         document.processing_stage = "connections"
         document.processing_progress = 92
-        document.processing_message = "Generando relaciones entre componentes"
         document.page_count = pdf.page_count
-        document.connection_status = "pending"
 
-        db.commit()
-        if _cancel_requested(document.id, db):
-            _mark_cancelled(document.id, db, "Procesamiento cancelado antes de generar relaciones")
-            return processed_pages
-        # Segunda etapa: precalcula relaciones una sola vez. Las búsquedas normales
-        # siguen consultando el índice existente y no esperan este análisis.
-        rebuild_document_connections(document.id, db)
-        if _cancel_requested(document.id, db):
-            _mark_cancelled(document.id, db, "Procesamiento cancelado por el usuario")
-            return processed_pages
-        db.refresh(document)
+        if technical_document:
+            # Los documentos técnicos tienen un índice documental separado lógicamente:
+            # páginas + términos, sin construir relaciones eléctricas espurias.
+            document.processing_message = "Finalizando índice documental"
+            document.connection_status = "not_applicable"
+            db.commit()
+        else:
+            document.processing_message = "Generando relaciones entre componentes"
+            document.connection_status = "pending"
+            db.commit()
+            if _cancel_requested(document.id, db):
+                _mark_cancelled(document.id, db, "Procesamiento cancelado antes de generar relaciones")
+                return processed_pages
+            # Segunda etapa: precalcula relaciones una sola vez. Las búsquedas normales
+            # siguen consultando el índice existente y no esperan este análisis.
+            rebuild_document_connections(document.id, db)
+            if _cancel_requested(document.id, db):
+                _mark_cancelled(document.id, db, "Procesamiento cancelado por el usuario")
+                return processed_pages
+            db.refresh(document)
         document.processing_status = "completed"
         document.processing_stage = "completed"
         document.processing_progress = 100

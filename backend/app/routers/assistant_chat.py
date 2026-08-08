@@ -152,6 +152,67 @@ def _reference_aliases(value: str) -> set[str]:
     return aliases
 
 
+TECHNICAL_DOC_TYPES = {"manual", "datasheet", "procedimiento", "mantenimiento"}
+PLAN_DOC_TYPES = {"plano_electrico", "plc"}
+
+BILINGUAL_TECH_TERMS = {
+    "velocidad": ("speed", "velocity", "setpoint"),
+    "frecuencia": ("frequency", "hz"),
+    "configurar": ("configure", "configuration", "setup"),
+    "configuracion": ("configuration", "setup"),
+    "configuración": ("configuration", "setup"),
+    "parametro": ("parameter",),
+    "parámetro": ("parameter",),
+    "parametros": ("parameters",),
+    "parámetros": ("parameters",),
+    "alarma": ("alarm",),
+    "falla": ("fault", "error"),
+    "error": ("fault", "error"),
+    "protocolo": ("protocol",),
+    "comunicacion": ("communication", "communications"),
+    "comunicación": ("communication", "communications"),
+    "consigna": ("setpoint", "reference"),
+    "control": ("control", "control word"),
+    "palabra": ("word",),
+    "direccion": ("address",),
+    "dirección": ("address",),
+    "telegrama": ("telegram",),
+    "diagnostico": ("diagnostic", "diagnostics"),
+    "diagnóstico": ("diagnostic", "diagnostics"),
+    "puesta": ("commissioning",),
+    "marcha": ("run", "start"),
+}
+
+def _expanded_keywords(question: str) -> list[str]:
+    terms = list(_keywords(question))
+    lowered = question.lower()
+    for spanish, english_terms in BILINGUAL_TECH_TERMS.items():
+        if spanish in lowered:
+            terms.extend(english_terms)
+    # Acrónimos/protocolos se preservan tal cual.
+    for acronym in re.findall(r"\b[A-Za-z]{2,8}\b", question):
+        if acronym.upper() in {"USS", "PROFIBUS", "PROFINET", "MODBUS", "CAN", "PZD", "PKW", "VFD", "PLC", "HMI"}:
+            terms.append(acronym.lower())
+    return list(dict.fromkeys(term for term in terms if term))[:18]
+
+def _question_prefers_technical_docs(question: str) -> bool:
+    q = question.lower()
+    return any(token in q for token in (
+        "cómo configurar", "como configurar", "parámetro", "parametro", "manual",
+        "protocolo", "uss", "comunicación", "comunicacion", "alarma", "falla",
+        "diagnóstico", "diagnostico", "puesta en marcha", "setpoint", "consigna",
+        "baud", "telegrama", "pzd", "pkw", "control de velocidad",
+    ))
+
+def _doc_priority(document_type: str | None, prefer_technical: bool) -> int:
+    dtype = (document_type or "plano_electrico").strip().lower()
+    if prefer_technical:
+        order = {"manual": 0, "procedimiento": 1, "datasheet": 2, "mantenimiento": 3, "plc": 4, "plano_electrico": 5}
+    else:
+        order = {"plano_electrico": 0, "plc": 1, "procedimiento": 2, "manual": 3, "datasheet": 4, "mantenimiento": 5}
+    return order.get(dtype, 6)
+
+
 def _base_page_query(db: Session, organization_id: int | None, plant_id: int | None, sector_id: int | None):
     query = (
         db.query(models.DocumentPage, models.Document, models.Sector, models.Plant, models.Organization)
@@ -223,6 +284,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "page_id": page.id,
                 "document_id": doc.id,
                 "document_title": doc.title,
+                "document_type": doc.document_type or "plano_electrico",
                 "organization": org.name,
                 "plant": plant.name,
                 "sector": sector.name,
@@ -273,6 +335,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "page_id": page.id,
                 "document_id": doc.id,
                 "document_title": doc.title,
+                "document_type": doc.document_type or "plano_electrico",
                 "organization": org.name,
                 "plant": plant.name,
                 "sector": sector.name,
@@ -285,7 +348,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "is_current_context": False,
             })
 
-    terms = _keywords(payload.question)
+    terms = _expanded_keywords(payload.question)
     if terms and len(snippets) < 8:
         search_terms = list(terms)
         for ref in references:
@@ -294,7 +357,15 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
         filters = [models.DocumentPage.text_content.ilike(f"%{term}%") for term in search_terms]
         page_query = _base_page_query(db, payload.organization_id, payload.plant_id, payload.sector_id)
         page_query = page_query.filter(or_(*filters))
-        for page, doc, sector, plant, org in page_query.limit(12).all():
+        # Traemos un conjunto más amplio y ordenamos en memoria por tipo documental.
+        # Así una pregunta de configuración/USS prioriza manuales sin alterar el índice de planos.
+        prefer_technical = _question_prefers_technical_docs(payload.question)
+        rows = page_query.limit(60).all()
+        rows.sort(key=lambda row: (
+            _doc_priority(row[1].document_type, prefer_technical),
+            row[0].page_number,
+        ))
+        for page, doc, sector, plant, org in rows:
             if page.id in seen_pages:
                 continue
             seen_pages.add(page.id)
@@ -311,6 +382,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "page_id": page.id,
                 "document_id": doc.id,
                 "document_title": doc.title,
+                "document_type": doc.document_type or "plano_electrico",
                 "organization": org.name,
                 "plant": plant.name,
                 "sector": sector.name,
@@ -319,7 +391,7 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 "y": None,
                 "width": None,
                 "height": None,
-                "text": (page.text_content or "")[:2800],
+                "text": (page.text_content or "")[:4200],
                 "is_current_context": False,
             })
             if len(snippets) >= 8:
@@ -367,7 +439,8 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
         context_mark = " | CONTEXTO ACTUAL ABIERTO POR EL USUARIO" if item.get("is_current_context") else ""
         header = (
             f"FUENTE {index}{context_mark} | Empresa: {item['organization']} | Planta: {item['plant']} | "
-            f"Sector: {item['sector']} | Documento: {item['document_title']} | Página: {item['page_number']}"
+            f"Sector: {item['sector']} | Documento: {item['document_title']} | "
+            f"Tipo documental: {item.get('document_type') or 'plano_electrico'} | Página: {item['page_number']}"
         )
         details = " | ".join(
             value for value in [
@@ -384,6 +457,7 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             "document_id": item["document_id"],
             "page_id": item["page_id"],
             "document_title": item["document_title"],
+            "document_type": item.get("document_type") or "plano_electrico",
             "page_number": item["page_number"],
             "reference": item["reference"],
             "organization": item["organization"],
@@ -410,10 +484,12 @@ Continuá exactamente desde donde quedó. No repitas lo ya dicho. Terminá las f
 
     prompt = f"""Sos DiagramIQ, un asistente técnico de mantenimiento industrial.
 Respondé en español claro y práctico usando SOLO la información del contexto indexado.
+El documento fuente puede estar en inglés: traducí la explicación al español, pero CONSERVÁ literalmente nombres de parámetros, códigos, registros, acrónimos, etiquetas de bornes, alarmas y nomenclatura del fabricante (por ejemplo P2010, PZD, PKW, USS, Control Word).
 No inventes conexiones, protecciones, parámetros ni causas que no estén respaldaldadas por el contexto.
 Cuando algo no pueda confirmarse, decilo expresamente.
 Citá las fuentes dentro de la respuesta como [Fuente 1], [Fuente 2], etc.
 Priorizá el componente principal sobre listados o menciones secundarias.
+Para preguntas de configuración, protocolos, parámetros, alarmas o puesta en marcha, priorizá Manual/Procedimiento/Datasheet. Para ubicación, conexiones físicas o qué protege/controla un TAG, priorizá Plano eléctrico.
 Si una fuente está marcada como CONTEXTO ACTUAL ABIERTO POR EL USUARIO, respondé sobre esa instancia concreta y no sobre otra referencia homónima de otro sector.
 Organizá la respuesta con este orden: resumen técnico, función, conexión/relaciones, advertencias y fuentes.
 Sé completo pero evitá repeticiones. Cerrá todas las frases y no termines una sección a mitad.

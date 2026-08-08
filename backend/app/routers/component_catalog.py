@@ -839,10 +839,17 @@ def _filtered_items(
         items = [item for item in items if item["component_type"].lower() == wanted]
 
     if search_normalized:
-        # Si existen coincidencias en referencia/modelo, se eliminan menciones secundarias.
-        best_rank = min((item["match_rank"] for item in items), default=99)
-        if best_rank <= 3:
+        # Cuando la consulta parece una referencia/equipo (Q401, TC-7002-1, KM3, etc.)
+        # no mostramos componentes cuya única coincidencia sea una mención en el texto.
+        # Eso evitaba casos donde, buscando Q401 dentro de Caldera1, aparecía una ficha
+        # de otro equipo cuyo row_text simplemente contenía Q401.
+        looks_like_reference = bool(re.search(r"[A-Za-z]", q or "") and re.search(r"\d", q or ""))
+        if looks_like_reference:
             items = [item for item in items if item["match_rank"] <= 3]
+        else:
+            best_rank = min((item["match_rank"] for item in items), default=99)
+            if best_rank <= 3:
+                items = [item for item in items if item["match_rank"] <= 3]
         items.sort(key=lambda item: (
             item["match_rank"],
             normalize_term(item["reference"]),
@@ -942,6 +949,15 @@ def list_components(
                 exact_channel_items.append(candidate)
         if exact_channel_items:
             consolidated = exact_channel_items
+
+    # Defensa final de alcance: aunque una ruta auxiliar o una sincronización futura
+    # cambie, la respuesta del catálogo nunca puede escapar de los filtros elegidos.
+    if organization_id is not None:
+        consolidated = [item for item in consolidated if item.get("organization_id") == organization_id]
+    if plant_id is not None:
+        consolidated = [item for item in consolidated if item.get("plant_id") == plant_id]
+    if sector_id is not None:
+        consolidated = [item for item in consolidated if item.get("sector_id") == sector_id]
 
     consolidated.sort(key=lambda item: (
         item.get("match_rank", 99),

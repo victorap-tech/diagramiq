@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy import inspect, text
@@ -24,6 +24,7 @@ from app.routers import (
     component_relations,
     assistant_chat,
     component_library,
+    auth,
 )
 
 # Crear tablas solo si no existen
@@ -127,10 +128,10 @@ ensure_processing_columns()
 app = FastAPI(
     title="DiagramIQ API",
     description="Asistente inteligente para mantenimiento industrial",
-    version="0.14.4",
+    version="0.15.1",
 )
 
-APP_VERSION = "0.14.4"
+APP_VERSION = "0.15.1"
 
 # Ruta absoluta de la carpeta app
 BASE_DIR = Path(__file__).resolve().parent
@@ -141,6 +142,52 @@ app.mount(
     StaticFiles(directory=BASE_DIR / "static"),
     name="static",
 )
+
+# Rutas públicas mínimas. Todo lo demás requiere sesión.
+PUBLIC_PATHS = {"/login", "/auth/login", "/auth/status", "/health"}
+PUBLIC_PREFIXES = ("/static/",)
+
+# Límite básico por IP para endpoints costosos de IA.
+from collections import defaultdict, deque
+import time
+_ai_requests = defaultdict(deque)
+AI_WINDOW_SECONDS = 60
+AI_MAX_REQUESTS = 30
+
+@app.middleware("http")
+async def security_gate(request: Request, call_next):
+    path = request.url.path
+    is_public = path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
+
+    if path == "/login":
+        if auth.request_is_authenticated(request):
+            return RedirectResponse(url="/", status_code=303)
+        return FileResponse(BASE_DIR / "static" / "login.html")
+
+    if not is_public and not auth.request_is_authenticated(request):
+        accepts_html = "text/html" in request.headers.get("accept", "")
+        if request.method == "GET" and accepts_html:
+            return RedirectResponse(url="/login", status_code=303)
+        return JSONResponse(status_code=401, content={"detail": "Sesión requerida."})
+
+    if auth.request_is_authenticated(request) and (path.startswith("/assistant/") or path.startswith("/vision/") or path.startswith("/components/recognize") or path.startswith("/cable-tags/recognize")):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        key = forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+        now = time.time()
+        bucket = _ai_requests[key]
+        while bucket and bucket[0] < now - AI_WINDOW_SECONDS:
+            bucket.popleft()
+        if len(bucket) >= AI_MAX_REQUESTS:
+            return JSONResponse(status_code=429, content={"detail": "Demasiadas consultas de IA. Esperá un minuto."})
+        bucket.append(now)
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+    return response
+
 
 @app.middleware("http")
 async def prevent_stale_frontend_cache(request: Request, call_next):
@@ -170,6 +217,7 @@ app.include_router(component_catalog.router)
 app.include_router(component_relations.router)
 app.include_router(assistant_chat.router)
 app.include_router(component_library.router)
+app.include_router(auth.router)
 
 
 @app.on_event("startup")

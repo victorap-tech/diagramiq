@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/styles.css?v=0.12.7"
+        href="/static/styles.css?v=0.15.1"
     >
 </head>
 
@@ -33,6 +33,7 @@
         </div>
 
         <div class="api-status">
+            <form action="/auth/logout" method="post" style="margin-right:10px"><button class="secondary-button" type="submit">Salir</button></form>
             <span
                 id="statusIndicator"
                 class="status-indicator"
@@ -458,12 +459,12 @@
                     </span>
 
                     <h2>
-                        Cargar plano eléctrico
+                        Cargar documento técnico
                     </h2>
 
                     <p>
                         Primero creá la empresa, planta y sector en la pestaña Empresas.
-                        La carga exige una jerarquía completa y persistente.
+                        Podés cargar planos, manuales, datasheets y procedimientos; DiagramIQ los mantiene diferenciados.
                     </p>
                 </div>
             </div>
@@ -589,6 +590,14 @@
                                 Manual
                             </option>
 
+                            <option value="datasheet">
+                                Datasheet / ficha técnica
+                            </option>
+
+                            <option value="procedimiento">
+                                Procedimiento técnico
+                            </option>
+
                             <option value="plc">
                                 Documentación PLC
                             </option>
@@ -644,6 +653,7 @@
                                 <small id="selectedFileName">
                                     Ningún archivo seleccionado
                                 </small>
+                                <small>Los manuales pueden estar en inglés; el asistente responde en español conservando parámetros y códigos originales.</small>
                             </div>
                         </div>
                     </div>
@@ -804,7 +814,7 @@
     </div>
 
     <footer class="main-footer">
-        <span>DiagramIQ v0.14.8</span>
+        <span>DiagramIQ v0.15.1</span>
 
         <a
             href="/docs"
@@ -815,6 +825,6 @@
         </a>
     </footer>
 
-    <script src="/static/app.js?v=0.12.7"></script>
+    <script src="/static/app.js?v=0.15.1"></script>
 </body>
 </html>
