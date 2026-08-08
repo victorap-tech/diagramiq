@@ -29,7 +29,7 @@ REFERENCE_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:"
     # Designaciones IEC de componentes. DI/DO/AI/AO deben llevar número
     # para no confundir palabras del borde como DIESES.
-    r"[-=+]?(?:(?:KM|KA|KE|QF|QS|QA|FU|FR|FC|PLC|XD|XT|X|M|B|V)[A-Z0-9]+"
+    r"[-=+]?(?:(?:KM|KA|KE|QF|QS|QA|Q|FU|FR|FC|PLC|XD|XT|X|W|M|B|V)[A-Z0-9]+"
     r"|(?:DI|DO|AI|AO)\d+[A-Z0-9]*)"
     r"(?:[_./-][A-Z0-9]+)*|"
     # Potenciales y nombres de conductores: 401_A1+, 24VDC+, L1, N, PE.
@@ -100,6 +100,12 @@ def classify_reference(reference: str) -> str:
 
     if value.startswith("QA"):
         return "Interruptor o actuador"
+
+    if re.fullmatch(r"Q[A-Z0-9]+(?:[_./-][A-Z0-9]+)*", value):
+        return "Protección o maniobra Q"
+
+    if re.fullmatch(r"W[A-Z0-9]+(?:[_./-][A-Z0-9]+)*", value):
+        return "Cable"
 
     if value.startswith("FC"):
         return "Referencia FC"

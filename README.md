@@ -1,4 +1,9 @@
-# DiagramIQ v0.15.4
+# DiagramIQ v0.15.6
+
+## v0.15.6 — Relaciones funcionales de potencia
+
+`Ver relacionados` conserva el componente consultado como raíz y detecta equipos de accionamiento/protección asociados en el mismo circuito. Se agregó reconocimiento de variadores Siemens SINAMICS por modelo `6SL...`; por ejemplo, desde un guardamotor Q401 puede aparecer el variador IF401-1/6SL... como relacionado sin reemplazar a Q401 como componente principal.
+
 
 Base: v0.14.8 estable.
 
@@ -58,7 +63,7 @@ DIAGRAMIQ_AUTH_SECRET=<cadena-aleatoria-larga>
 La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/health`, `/login` y los archivos estáticos son las únicas rutas públicas necesarias. Los endpoints costosos de IA incluyen un límite básico de solicitudes por IP.
 
 
-## v0.15.4 — Aprendizaje de nomenclatura por sector/documento
+## v0.15.6 — Aprendizaje de nomenclatura por sector/documento
 
 - Aprende prefijos locales del plano usando fichas ya confirmadas dentro del mismo sector.
 - Ejemplo: en Caldera1, si una referencia `Q...` confirmada es guardamotor, otras `Q...` del mismo sector pueden clasificarse como guardamotor cuando no haya evidencia contradictoria.
@@ -67,9 +72,17 @@ La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/hea
 - La evidencia local y los modelos de fabricante siempre tienen prioridad sobre una regla aprendida.
 - Si un prefijo tiene usos contradictorios, no se aplica automáticamente salvo que exista una mayoría clara.
 
-## v0.15.4 — Reindexación segura con integridad referencial
+## v0.15.6 — Reindexación segura con integridad referencial
 - Corrige `ForeignKeyViolation` al reindexar documentos ya procesados.
 - La limpieza respeta el orden: conexiones → adjuntos → términos/referencias → páginas.
 - La limpieza de PostgreSQL se ejecuta en una sola transacción con rollback ante error.
 - Los PNG anteriores se eliminan solamente después de confirmar la limpieza en base de datos.
 - Conserva el aprendizaje de nomenclatura por sector/documento de v0.15.3.
+
+## v0.15.6 — Referencia exacta en Asistente + visor 1 de 1
+
+- El Asistente reconoce TAGs como `Q401` aunque todavía no tengan ficha consolidada.
+- Si la pregunta contiene una referencia exacta, la tarjeta **Componente identificado** queda anclada a esa referencia y no puede ser sustituida por un variador, motor u otro componente cercano de la misma página.
+- Si falta la ficha histórica, recupera un modelo técnico cercano (por ejemplo `3RV...`) desde el texto indexado de la página para clasificar la referencia sin inventar datos.
+- La gramática del indexador incorpora TAGs `Q...` y `W...` para futuras reindexaciones (`Q` protección/maniobra según nomenclatura aprendida, `W` cable).
+- Al abrir una fuente individual desde el Asistente, el visor muestra `1 de 1` en lugar de `0 de 0`.

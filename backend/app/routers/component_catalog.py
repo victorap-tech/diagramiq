@@ -36,6 +36,7 @@ MODEL_TYPE_RULES = (
     (re.compile(r"^3RT", re.IGNORECASE), "contactor"),
     (re.compile(r"^3RW", re.IGNORECASE), "arrancador suave"),
     (re.compile(r"^(ATV|ALTIVAR)", re.IGNORECASE), "variador"),
+    (re.compile(r"^6SL", re.IGNORECASE), "variador"),
     (re.compile(r"^(FC-|FC\s)?\d{2,4}", re.IGNORECASE), "variador"),
     (re.compile(r"^6ES7", re.IGNORECASE), "módulo PLC"),
 )

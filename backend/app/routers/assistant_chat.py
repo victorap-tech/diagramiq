@@ -152,6 +152,52 @@ def _reference_aliases(value: str) -> set[str]:
     return aliases
 
 
+def _question_reference_candidates(question: str) -> list[str]:
+    """Extrae TAGs explícitos aunque no estén aún en la gramática IEC global.
+
+    Esto es deliberadamente más permisivo que extract_references(): el asistente
+    debe respetar lo que el técnico escribió (por ejemplo Q401) y luego limitar
+    la búsqueda al sector/documento seleccionado.
+    """
+    candidates = list(extract_references(question or ""))
+    for token in re.findall(r"(?<![A-Z0-9])[-=+]?[A-Z]{1,8}\d+[A-Z0-9]*(?:[_./-][A-Z0-9]+)*(?![A-Z0-9])", (question or "").upper()):
+        normalized = normalize_reference(token)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates[:8]
+
+
+def _model_near_reference(reference: str, text: str | None) -> str:
+    """Obtiene un modelo técnico cercano al TAG sin confundir otro TAG como modelo."""
+    body = text or ""
+    if not body or not reference:
+        return ""
+    model_re = re.compile(
+        r"\b(?:3RV\d+[A-Z0-9-]*|3RW\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|6ES7[A-Z0-9-]+|6SL[A-Z0-9-]+|"
+        r"ATV[A-Z0-9-]+|LC1D[A-Z0-9-]+|GV2[A-Z0-9-]+|VLT[A-Z0-9-]+|ACS[A-Z0-9-]+|"
+        r"MS116[A-Z0-9-]*|PKZ(?:M)?[A-Z0-9-]*|AF\d+[A-Z0-9-]*)\b",
+        re.IGNORECASE,
+    )
+    matches = list(model_re.finditer(body))
+    if not matches:
+        return ""
+    aliases = _reference_aliases(reference)
+    positions = []
+    for alias in aliases:
+        positions.extend(m.start() for m in re.finditer(re.escape(alias), body, re.IGNORECASE))
+    if not positions:
+        unique = []
+        seen = set()
+        for match in matches:
+            value = match.group(0).upper()
+            if value not in seen:
+                seen.add(value)
+                unique.append(match.group(0))
+        return unique[0] if len(unique) == 1 else ""
+    best = min(matches, key=lambda match: min(abs(match.start() - pos) for pos in positions))
+    return best.group(0)
+
+
 TECHNICAL_DOC_TYPES = {"manual", "datasheet", "procedimiento", "mantenimiento"}
 PLAN_DOC_TYPES = {"plano_electrico", "plc"}
 
@@ -231,7 +277,7 @@ def _base_page_query(db: Session, organization_id: int | None, plant_id: int | N
 
 
 def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict], list[str]]:
-    references = [normalize_reference(ref) for ref in extract_references(payload.question)]
+    references = [normalize_reference(ref) for ref in _question_reference_candidates(payload.question)]
     references = list(dict.fromkeys(ref for ref in references if ref))[:6]
     lookup_references = sorted({alias for ref in references for alias in _reference_aliases(ref)})
     snippets: list[dict] = []
@@ -262,7 +308,10 @@ def _collect_context(payload: AssistantQuestion, db: Session) -> tuple[list[dict
                 if requested and candidate_norm in requested:
                     current_ref = candidate
                     break
-            if current_ref is None and ref_candidates:
+            # Si el usuario preguntó/abrió un TAG exacto (p. ej. Q401), nunca
+            # sustituirlo por otro componente cercano de la misma página. Ese era
+            # el origen de tarjetas como IF401-1 cuando la explicación hablaba de Q401.
+            if current_ref is None and ref_candidates and not context_ref and not requested:
                 current_ref = max(
                     ref_candidates,
                     key=lambda item: (
@@ -417,6 +466,23 @@ def ask_diagramiq(payload: AssistantQuestion, db: Session = Depends(get_db)):
             "No encontré contexto suficiente en los documentos seleccionados. Probá incluir una referencia exacta, modelo o alarma.",
         )
 
+    # v0.15.5: una referencia exacta escrita por el técnico manda sobre cualquier
+    # componente vecino. Si aún no existe ComponentReference para ese TAG, la
+    # tarjeta se construye desde el texto de la página sin cambiar la respuesta IA.
+    exact_requested = {normalize_reference(ref) for ref in references if ref}
+    exact_context = normalize_reference(payload.context_reference or "")
+    if exact_context:
+        exact_requested.add(exact_context)
+    for item in snippets:
+        item_ref = normalize_reference(item.get("reference") or "")
+        if item_ref and item_ref in exact_requested:
+            if not item.get("model"):
+                item["model"] = _model_near_reference(item_ref, item.get("text"))
+            # infer_type se aplica más abajo al construir la tarjeta; aquí sólo
+            # aseguramos que la coincidencia exacta sea candidata aunque la ficha
+            # histórica esté incompleta.
+            item["is_exact_requested_reference"] = True
+
     # v0.14.6: si la referencia vino de un fallback de texto, recuperar las
     # coordenadas exactas del TAG desde PageSearchTerm para que el visor pueda
     # dibujar el resaltado amarillo aun cuando ComponentReference no tenga bbox.
@@ -516,8 +582,17 @@ CONTEXTO INDEXADO:
         item for item in snippets
         if item.get("reference")
         and not _is_ambiguous_component_reference(item.get("reference"))
-        and (item.get("type") or item.get("model") or item.get("manufacturer") or item.get("description"))
+        and (item.get("is_exact_requested_reference") or item.get("type") or item.get("model") or item.get("manufacturer") or item.get("description"))
     ]
+    exact_component_candidates = [
+        item for item in component_candidates
+        if normalize_reference(item.get("reference") or "") in requested_references
+    ]
+    if exact_component_candidates:
+        # Para preguntas con TAG exacto, nunca mostrar como componente principal
+        # un variador/motor vecino aunque tenga más evidencia física en la página.
+        component_candidates = exact_component_candidates
+
     def _physical_evidence_score(item):
         text = " ".join(filter(None, [item.get("description"), item.get("text")])).upper()
         score = 0

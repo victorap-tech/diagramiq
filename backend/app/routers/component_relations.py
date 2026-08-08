@@ -78,6 +78,7 @@ TEXT_DEVICE_RULES = (
     (re.compile(r"\b(3RV[0-9A-Z-]{4,})\b", re.IGNORECASE), "guardamotor", "Siemens", "protección de motor"),
     (re.compile(r"\b(3RT[0-9A-Z-]{4,})\b", re.IGNORECASE), "contactor", "Siemens", "maniobra de motor"),
     (re.compile(r"\b(ATV[0-9A-Z-]{2,}|ALTIVAR[0-9A-Z-]*)\b", re.IGNORECASE), "variador", "Schneider Electric", "control de motor"),
+    (re.compile(r"\b(6SL[0-9A-Z-]{5,})\b", re.IGNORECASE), "variador", "Siemens", "control de motor"),
     (re.compile(r"\b(VLT[- ]?[0-9A-Z-]+|FC[- ]?[0-9]{2,4}[A-Z0-9-]*)\b", re.IGNORECASE), "variador", "Danfoss", "control de motor"),
     (re.compile(r"\b(ACS[0-9A-Z-]{2,})\b", re.IGNORECASE), "variador", "ABB", "control de motor"),
     (re.compile(r"\b(GV2[A-Z0-9-]+)\b", re.IGNORECASE), "guardamotor", "Schneider Electric", "protección de motor"),
@@ -105,7 +106,7 @@ def _best_term_for_model(db: Session, page_id: int, model: str):
     candidates.sort(key=lambda t: (0 if t.x is not None and t.y is not None else 1, len(t.row_text or "")))
     return candidates[0]
 
-def _text_relations_for_motor(source, db: Session):
+def _text_power_relations(source, db: Session):
     """Detecta equipos de potencia/protección aunque no hayan quedado catalogados como ComponentReference.
 
     Esto evita que Ver relacionados dependa exclusivamente del catálogo: si el plano de un motor
@@ -115,6 +116,7 @@ def _text_relations_for_motor(source, db: Session):
     if not page:
         return []
     source_ref = normalize_term(source.reference)
+    source_type = infer_type(source.reference, source.detected_type, source.component_type, source.model, source.description or source.row_text)
     doc_id = page.document_id
     # Página actual primero y una página a cada lado como respaldo para circuitos partidos.
     pages = (
@@ -154,6 +156,9 @@ def _text_relations_for_motor(source, db: Session):
                 elif ctype == "guardamotor" and re.search(r"GUARDAMOTOR|MOTOR\s+PROTECT", evidence, re.IGNORECASE):
                     confidence = 96
                 reason = f"{manufacturer} {model} detectado en la misma página del circuito" if candidate_page.id == page.id else f"{manufacturer} {model} detectado en página eléctrica contigua"
+                functional_relation = relation
+                if source_type == "guardamotor" and ctype in {"variador", "arrancador suave"}:
+                    functional_relation = "equipo de accionamiento alimentado/protegido por el guardamotor"
                 found.append({
                     "id": None,
                     "reference": model,
@@ -163,7 +168,7 @@ def _text_relations_for_motor(source, db: Session):
                     "description": row_text,
                     "distance": None,
                     "confidence": confidence,
-                    "relation": relation,
+                    "relation": functional_relation,
                     "reason": reason,
                     "x": term.x if term else None,
                     "y": term.y if term else None,
@@ -173,7 +178,7 @@ def _text_relations_for_motor(source, db: Session):
                     "page_number": candidate_page.page_number,
                     "document_id": candidate_page.document_id,
                 })
-    found.sort(key=lambda item: _relation_priority("motor", item["component_type"], item["confidence"]))
+    found.sort(key=lambda item: _relation_priority(source_type, item["component_type"], item["confidence"]))
     return found
 
 def _merge_relations(primary, extra):
@@ -262,8 +267,8 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
                 "page_number": ref.document_page.page_number if ref.document_page else None,
                 "document_id": ref.document_page.document_id if ref.document_page else None,
             })
-        if source_type == "motor":
-            relations = _merge_relations(relations, _text_relations_for_motor(source, db))
+        if source_type in {"motor", "guardamotor", "interruptor", "fusible"}:
+            relations = _merge_relations(relations, _text_power_relations(source, db))
         relations.sort(key=lambda item: _relation_priority(source_type, item["component_type"], item["confidence"]))
         return {
             "source": {
@@ -328,8 +333,8 @@ def get_component_relations(reference_id: int, db: Session = Depends(get_db)):
             "x": ref.x, "y": ref.y, "width": ref.width, "height": ref.height,
         })
 
-    if source_type == "motor":
-        relations = _merge_relations(relations, _text_relations_for_motor(source, db))
+    if source_type in {"motor", "guardamotor", "interruptor", "fusible"}:
+        relations = _merge_relations(relations, _text_power_relations(source, db))
     relations.sort(key=lambda item: (_relation_priority(source_type, item["component_type"], item["confidence"]), item["distance"] if item.get("distance") is not None else 999999))
     doc = page.document
     return {

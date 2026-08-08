@@ -2680,18 +2680,20 @@ function updateViewerNavigation() {
     const total = state.search.results.length;
     const index = state.viewer.resultIndex;
 
+    const standalone = Boolean(state.viewer.result) && index < 0;
+
     if (elements.viewerPosition) {
         elements.viewerPosition.textContent = total > 0 && index >= 0
             ? `${index + 1} de ${total}`
-            : "0 de 0";
+            : (standalone ? "1 de 1" : "0 de 0");
     }
 
     if (elements.viewerPreviousButton) {
-        elements.viewerPreviousButton.disabled = index <= 0;
+        elements.viewerPreviousButton.disabled = standalone || index <= 0;
     }
 
     if (elements.viewerNextButton) {
-        elements.viewerNextButton.disabled = index < 0 || index >= total - 1;
+        elements.viewerNextButton.disabled = standalone || index < 0 || index >= total - 1;
     }
 }
 
