@@ -1,4 +1,4 @@
-# DiagramIQ v0.14.9
+# DiagramIQ v0.15.3
 
 Base: v0.14.8 estable.
 
@@ -23,12 +23,15 @@ DiagramIQ prioriza el manual, responde en español y conserva términos como `US
 
 Se conserva PostgreSQL + Bucket y el comportamiento de deploy seguro de la base estable.
 
-## v0.15.1 — Filtro estricto por sector
+## v0.15.2 — Filtro estricto + recuperación de TAG del plano
 
-- Componentes respeta estrictamente Empresa → Planta → Sector también durante búsquedas por referencia/modelo.
+- Mantiene el filtro estricto Empresa → Planta → Sector: nunca mezcla fichas de otro sector.
+- Si un TAG como `Q401` existe en el PDF del sector pero la ficha del catálogo quedó incompleta, lo recupera desde el índice textual persistente (`page_search_terms`).
+- La recuperación se hace **dentro del sector seleccionado**, por lo que no vuelve a introducir resultados de otras líneas.
+- Usa el contexto y el modelo cercano para clasificar equipos físicos; reconoce `3RV`, `GV2`, `MS116`, `PKZM/PKZ` y textos de protección de motor como guardamotor.
+- Conserva las coordenadas del término para poder abrir la página correcta del plano.
 - Evita que una respuesta antigua de una petición asíncrona pise el sector actualmente visible.
-- Las consultas tipo Q401/TC-7002-1 ya no devuelven fichas cuya única coincidencia sea una mención secundaria en el texto.
-- Mantiene las funciones de seguridad/login de v0.15.0.
+- Mantiene seguridad/login, documentación multilingüe y todas las funciones previas.
 
 ## v0.15.0 — Seguridad de acceso
 
@@ -53,3 +56,13 @@ DIAGRAMIQ_AUTH_SECRET=<cadena-aleatoria-larga>
 ```
 
 La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/health`, `/login` y los archivos estáticos son las únicas rutas públicas necesarias. Los endpoints costosos de IA incluyen un límite básico de solicitudes por IP.
+
+
+## v0.15.3 — Aprendizaje de nomenclatura por sector/documento
+
+- Aprende prefijos locales del plano usando fichas ya confirmadas dentro del mismo sector.
+- Ejemplo: en Caldera1, si una referencia `Q...` confirmada es guardamotor, otras `Q...` del mismo sector pueden clasificarse como guardamotor cuando no haya evidencia contradictoria.
+- En otro sector el mismo prefijo puede significar otra cosa; las reglas no se comparten entre sectores.
+- Incorpora reconocimiento de `W...` como cable cuando el plano aporta evidencia de cable/conductor.
+- La evidencia local y los modelos de fabricante siempre tienen prioridad sobre una regla aprendida.
+- Si un prefijo tiene usos contradictorios, no se aplica automáticamente salvo que exista una mayoría clara.

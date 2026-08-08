@@ -32,6 +32,7 @@ TYPE_MAP = {
 
 MODEL_TYPE_RULES = (
     (re.compile(r"^3RV", re.IGNORECASE), "guardamotor"),
+    (re.compile(r"^(GV2|MS116|PKZM|PKZ)", re.IGNORECASE), "guardamotor"),
     (re.compile(r"^3RT", re.IGNORECASE), "contactor"),
     (re.compile(r"^3RW", re.IGNORECASE), "arrancador suave"),
     (re.compile(r"^(ATV|ALTIVAR)", re.IGNORECASE), "variador"),
@@ -40,7 +41,7 @@ MODEL_TYPE_RULES = (
 )
 
 MODEL_MANUFACTURER_RULES = (
-    (re.compile(r"^(3RV|3RT|6ES7|6SL)", re.IGNORECASE), "Siemens"),
+    (re.compile(r"^(3RV|3RT|3RW|6ES7|6SL)", re.IGNORECASE), "Siemens"),
     (re.compile(r"^(ATV|LC1D|GV2|TM3|BMX)", re.IGNORECASE), "Schneider Electric"),
     (re.compile(r"^(FC-|VLT)", re.IGNORECASE), "Danfoss"),
     (re.compile(r"^(ACS|AF|MS116)", re.IGNORECASE), "ABB"),
@@ -435,7 +436,7 @@ def reference_aliases(value: str | None) -> set[str]:
 RELIABLE_MODEL_RE = re.compile(
     r"\b(?:3RV\d+[A-Z0-9-]*|3RT\d+[A-Z0-9-]*|6ES7[A-Z0-9-]+|6SL[A-Z0-9-]+|"
     r"ATV[A-Z0-9-]+|LC1D[A-Z0-9-]+|GV2[A-Z0-9-]+|VLT[A-Z0-9-]+|ACS[A-Z0-9-]+|"
-    r"MS116[A-Z0-9-]*|AF\d+[A-Z0-9-]*)\b",
+    r"MS116[A-Z0-9-]*|PKZ(?:M)?[A-Z0-9-]*|AF\d+[A-Z0-9-]*)\b",
     re.IGNORECASE,
 )
 
@@ -621,7 +622,7 @@ PHYSICAL_LIBRARY_TYPES = {
     "guardamotor", "contactor", "interruptor", "seccionador", "relé", "relé térmico",
     "fusible", "variador", "PLC", "módulo PLC", "módulo de entradas",
     "módulo de salidas", "módulo analógico", "motor", "sensor", "válvula",
-    "fuente", "transformador", "bornera", "pulsador", "piloto",
+    "fuente", "transformador", "bornera", "pulsador", "piloto", "cable",
 }
 
 CHANNEL_OR_SUBELEMENT_RE = re.compile(
@@ -690,15 +691,117 @@ def _infer_physical_type_from_page(reference: str, context: str) -> str:
         return "motor"
     for pattern, label in (
         (r"\b(?:VARIADOR|FREQUENZUMRICHTER|FREQUENCY CONVERTER|SINAMICS|ALTIVAR|VLT)\b", "variador"),
-        (r"\b(?:GUARDAMOTOR|MOTOR PROTECT|3RV)\b", "guardamotor"),
+        (r"\b(?:GUARDAMOTOR|MOTOR PROTECT(?:OR|ION)?|MOTOR CIRCUIT BREAKER|MPCB|3RV|GV2|MS116|PKZM?|MOTOR STARTER PROTECTOR)\b", "guardamotor"),
         (r"\b(?:CONTACTOR|SCHÜTZ|3RT)\b", "contactor"),
         (r"\b(?:SENSOR|PROXIM|ENCODER)\b", "sensor"),
         (r"\b(?:ELECTROV[ÁA]LVULA|SOLENOID|VALVE|V[ÁA]LVULA)\b", "válvula"),
         (r"\b(?:TRANSFORMADOR|TRANSFORMER)\b", "transformador"),
+        (r"\b(?:CABLE|CONDUCTOR|WIRE|LEITUNG)\b", "cable"),
     ):
         if re.search(pattern, upper):
             return label
     return ""
+
+
+
+GENERIC_OR_AMBIGUOUS_TYPES = {
+    "", "otro", "referencia técnica", "referencia fc", "sensor", "contacto o fin de carrera"
+}
+
+
+def _reference_prefix(value: str | None) -> str:
+    """Prefijo alfabético inicial del TAG, conservando convenciones locales (Q, FC, W, KM...)."""
+    raw = (value or "").upper().strip().lstrip("=-")
+    m = re.match(r"([A-Z]+)", raw)
+    return m.group(1) if m else ""
+
+
+def _sector_nomenclature_map(
+    db: Session,
+    organization_id: int | None,
+    plant_id: int | None,
+    sector_id: int | None,
+) -> dict[str, dict[str, Any]]:
+    """Aprende la nomenclatura del plano/sector desde fichas ya confirmadas.
+
+    Una evidencia fuerte puede enseñar el prefijo (p.ej. Q->guardamotor en Caldera1,
+    FC->guardamotor en Linck). La regla nunca sale del alcance seleccionado.
+    Si aparecen tipos contradictorios para el mismo prefijo, exige mayoría antes de usarla.
+    """
+    query = (
+        db.query(models.ComponentReference, models.DocumentPage, models.Document, models.Sector, models.Plant, models.Organization)
+        .join(models.DocumentPage, models.ComponentReference.document_page_id == models.DocumentPage.id)
+        .join(models.Document, models.DocumentPage.document_id == models.Document.id)
+        .join(models.Sector, models.Document.sector_id == models.Sector.id)
+        .join(models.Plant, models.Sector.plant_id == models.Plant.id)
+        .join(models.Organization, models.Plant.organization_id == models.Organization.id)
+    )
+    if organization_id is not None:
+        query = query.filter(models.Organization.id == organization_id)
+    if plant_id is not None:
+        query = query.filter(models.Plant.id == plant_id)
+    if sector_id is not None:
+        query = query.filter(models.Sector.id == sector_id)
+
+    from collections import defaultdict, Counter
+    votes: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for row in query.limit(50000).all():
+        item = _row_to_item(row)
+        prefix = _reference_prefix(item.get("reference"))
+        ctype = (item.get("component_type") or "").strip().lower()
+        if not prefix or ctype in GENERIC_OR_AMBIGUOUS_TYPES or is_nonphysical_reference(item.get("reference")):
+            continue
+        confidence = int(item.get("catalog_confidence") or 0)
+        if item.get("physical_evidence_type"):
+            confidence = max(confidence, 90)
+        if _is_reliable_model(item.get("model")):
+            confidence = max(confidence, 90)
+        # Preferimos evidencias explícitas, pero una ficha ya clasificada en el sector
+        # también puede enseñar la convención local.
+        if confidence < 60:
+            confidence = 60
+        votes[prefix].append((ctype, confidence))
+
+    learned: dict[str, dict[str, Any]] = {}
+    for prefix, rows in votes.items():
+        weighted = Counter()
+        samples = Counter()
+        for ctype, confidence in rows:
+            weighted[ctype] += confidence
+            samples[ctype] += 1
+        if not weighted:
+            continue
+        best, best_score = weighted.most_common(1)[0]
+        second_score = weighted.most_common(2)[1][1] if len(weighted) > 1 else 0
+        # Una evidencia fuerte basta; con conflicto se requiere una ventaja clara.
+        if samples[best] >= 1 and (second_score == 0 or best_score >= second_score * 1.5):
+            learned[prefix] = {
+                "component_type": best,
+                "samples": samples[best],
+                "score": best_score,
+                "confidence": min(98, 70 + min(samples[best], 7) * 4),
+            }
+    return learned
+
+
+def _apply_learned_nomenclature(item: dict[str, Any], learned: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    prefix = _reference_prefix(item.get("reference"))
+    rule = learned.get(prefix)
+    if not rule:
+        return item
+    current = (item.get("component_type") or "").strip().lower()
+    # Evidencia local/modelo específico manda sobre el diccionario aprendido.
+    if item.get("physical_evidence_type") or _model_type(item.get("model") or ""):
+        return item
+    if current in GENERIC_OR_AMBIGUOUS_TYPES or current not in PHYSICAL_LIBRARY_TYPES:
+        item["component_type"] = rule["component_type"]
+        item["nomenclature_learned"] = True
+        item["nomenclature_prefix"] = prefix
+        item["nomenclature_samples"] = rule["samples"]
+        item["catalog_confidence"] = max(int(item.get("catalog_confidence") or 0), int(rule["confidence"]))
+        if not item.get("match_reason"):
+            item["match_reason"] = f"Tipo aprendido por nomenclatura del sector: {prefix} → {rule['component_type']}"
+    return item
 
 
 def _sync_catalog_from_page_index(
@@ -770,6 +873,110 @@ def _sync_catalog_from_page_index(
         db.commit()
     return created
 
+
+
+def _fallback_items_from_page_index(
+    db: Session,
+    reference: str,
+    organization_id: int | None,
+    plant_id: int | None,
+    sector_id: int | None,
+    limit: int = 50,
+    learned_nomenclature: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Recupera un equipo directamente del índice textual, sin salir del sector.
+
+    Es un fallback para planos ya indexados donde el TAG existe (p. ej. Q401) pero
+    la ficha ``component_references`` quedó incompleta o asociada a otra referencia.
+    No relaja el alcance: empresa/planta/sector se aplican en SQL antes de buscar.
+    """
+    raw = (reference or "").strip()
+    wanted = normalize_term(raw)
+    if len(wanted) < 2 or is_nonphysical_reference(raw) or is_plc_channel(raw):
+        return []
+
+    query = (
+        db.query(models.PageSearchTerm, models.DocumentPage, models.Document, models.Sector, models.Plant, models.Organization)
+        .join(models.DocumentPage, models.PageSearchTerm.document_page_id == models.DocumentPage.id)
+        .join(models.Document, models.DocumentPage.document_id == models.Document.id)
+        .join(models.Sector, models.Document.sector_id == models.Sector.id)
+        .join(models.Plant, models.Sector.plant_id == models.Plant.id)
+        .join(models.Organization, models.Plant.organization_id == models.Organization.id)
+    )
+    if organization_id is not None:
+        query = query.filter(models.Organization.id == organization_id)
+    if plant_id is not None:
+        query = query.filter(models.Plant.id == plant_id)
+    if sector_id is not None:
+        query = query.filter(models.Sector.id == sector_id)
+
+    aliases = reference_aliases(raw) or {raw}
+    sql_filters = []
+    for alias in aliases:
+        sql_filters.extend([
+            models.PageSearchTerm.term.ilike(alias),
+            models.PageSearchTerm.display_text.ilike(alias),
+        ])
+    rows = query.filter(or_(*sql_filters)).limit(limit * 4).all()
+
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[int, int | None, int | None]] = set()
+    for term, page, document, sector, plant, organization in rows:
+        candidates = (term.term or "", term.display_text or "")
+        if not any(normalize_term(value) == wanted for value in candidates):
+            continue
+        key = (page.id, term.x, term.y)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        local = " ".join(filter(None, (
+            term.row_text,
+            _context_around_reference(page.text_content, term.display_text or raw, radius=900),
+        )))
+        model = _best_model_from_page(raw, local or page.text_content, "")
+        component_type = _model_type(model) or _infer_physical_type_from_page(raw, local)
+        if not component_type:
+            component_type = infer_type(raw, None, None, model, local) or ""
+        # Si la página aislada no alcanza, aplicar el diccionario aprendido del sector.
+        prefix = _reference_prefix(raw)
+        learned_rule = (learned_nomenclature or {}).get(prefix)
+        if (component_type in GENERIC_OR_AMBIGUOUS_TYPES or component_type not in PHYSICAL_LIBRARY_TYPES) and learned_rule:
+            component_type = learned_rule["component_type"]
+        if component_type not in PHYSICAL_LIBRARY_TYPES and component_type != "arrancador suave":
+            continue
+
+        manufacturer = infer_manufacturer(model, None)
+        links = official_component_links(manufacturer, model)
+        results.append({
+            "id": 0,
+            "reference": raw.upper(),
+            "display_reference": raw.upper(),
+            "parent_reference": "",
+            "channel_reference": "",
+            "component_type": component_type,
+            "model": model,
+            "manufacturer": manufacturer,
+            "product_url": links["product_url"],
+            "manual_url": links["manual_url"],
+            "source_kind": "page-index-fallback",
+            "catalog_confidence": 80 if model else 70,
+            "description": local,
+            "document_id": document.id,
+            "document_title": document.title,
+            "page_number": page.page_number,
+            "page_id": page.id,
+            "x": term.x, "y": term.y, "width": term.width, "height": term.height,
+            "organization_id": organization.id, "organization_name": organization.name,
+            "plant_id": plant.id, "plant_name": plant.name,
+            "sector_id": sector.id, "sector_name": sector.name,
+            "match_rank": 0,
+            "match_reason": "Coincidencia exacta recuperada del índice del plano",
+            "evidence_confirmed": True,
+        })
+        if len(results) >= limit:
+            break
+    return results
 
 def is_library_equipment(item: dict[str, Any], include_incomplete: bool = False) -> bool:
     """Deja en Biblioteca solo equipos físicos; señales y canales quedan en Buscar.
@@ -874,9 +1081,29 @@ def list_components(
     if q and q.strip():
         _sync_catalog_from_page_index(db, q, organization_id, plant_id, sector_id)
 
+    learned_nomenclature = _sector_nomenclature_map(db, organization_id, plant_id, sector_id)
+
     raw_items = _filtered_items(
         db, organization_id, plant_id, sector_id, component_type, q, hard_limit=10000
     )
+    raw_items = [_apply_learned_nomenclature(item, learned_nomenclature) for item in raw_items]
+
+    # Si el TAG está en el plano del sector pero su ficha de catálogo quedó incompleta,
+    # recuperarlo desde page_search_terms. Esto mantiene el filtro de sector estricto
+    # y evita volver al problema de mostrar equipos pertenecientes a otro sector.
+    if q and q.strip():
+        wanted = normalize_term(q)
+        has_direct = any(
+            normalize_term(item.get("reference")) == wanted or normalize_term(item.get("model")) == wanted
+            for item in raw_items
+        )
+        if not has_direct:
+            recovered = _fallback_items_from_page_index(
+                db, q, organization_id, plant_id, sector_id, limit=50,
+                learned_nomenclature=learned_nomenclature,
+            )
+            raw_items.extend(_apply_learned_nomenclature(item, learned_nomenclature) for item in recovered)
+
     raw_items = [item for item in raw_items if is_library_equipment(item, include_incomplete)]
 
     # Consolida apariciones repetidas: una ficha por referencia real, documento y sector.
