@@ -191,31 +191,86 @@ def remove_existing_pages(
     document: models.Document,
     db: Session,
 ) -> None:
-    """
-    Elimina páginas y referencias generadas por un
-    procesamiento anterior.
+    """Elimina de forma segura el índice anterior de un documento.
+
+    Orden importante por integridad referencial:
+    1) relaciones (component_connections),
+    2) adjuntos ligados a referencias (component_assets),
+    3) términos y referencias,
+    4) páginas.
+
+    Esto evita ForeignKeyViolation durante una reindexación cuando una
+    ComponentReference todavía está siendo usada por ComponentConnection.
+    La limpieza de base se ejecuta como una sola transacción: si algo falla,
+    se hace rollback y el índice anterior no queda parcialmente eliminado.
     """
     existing_pages = (
         db.query(models.DocumentPage)
-        .filter(
-            models.DocumentPage.document_id
-            == document.id
-        )
+        .filter(models.DocumentPage.document_id == document.id)
         .all()
     )
+    page_ids = [page.id for page in existing_pages]
+    image_paths = [Path(page.image_path) for page in existing_pages if page.image_path]
 
-    for existing_page in existing_pages:
-        if existing_page.image_path:
-            image_path = Path(
-                existing_page.image_path
+    if not page_ids:
+        return
+
+    reference_ids = [
+        row[0]
+        for row in (
+            db.query(models.ComponentReference.id)
+            .filter(models.ComponentReference.document_page_id.in_(page_ids))
+            .all()
+        )
+    ]
+
+    try:
+        # Las conexiones son las primeras en borrarse porque sus FK apuntan
+        # a component_references.source_reference_id/target_reference_id.
+        connection_query = db.query(models.ComponentConnection).filter(
+            models.ComponentConnection.document_id == document.id
+        )
+        if reference_ids:
+            connection_query = db.query(models.ComponentConnection).filter(
+                (models.ComponentConnection.document_id == document.id)
+                | (models.ComponentConnection.source_reference_id.in_(reference_ids))
+                | (models.ComponentConnection.target_reference_id.in_(reference_ids))
             )
+        connection_query.delete(synchronize_session=False)
 
+        if reference_ids:
+            db.query(models.ComponentAsset).filter(
+                models.ComponentAsset.component_reference_id.in_(reference_ids)
+            ).delete(synchronize_session=False)
+
+        db.query(models.PageSearchTerm).filter(
+            models.PageSearchTerm.document_page_id.in_(page_ids)
+        ).delete(synchronize_session=False)
+
+        db.query(models.ComponentReference).filter(
+            models.ComponentReference.document_page_id.in_(page_ids)
+        ).delete(synchronize_session=False)
+
+        db.query(models.DocumentPage).filter(
+            models.DocumentPage.id.in_(page_ids)
+        ).delete(synchronize_session=False)
+
+        document.connection_count = 0
+        document.connection_status = "pending"
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    # Los PNG viejos se eliminan solo después del commit exitoso.
+    for image_path in image_paths:
+        try:
             if image_path.exists():
                 image_path.unlink()
-
-        db.delete(existing_page)
-
-    db.flush()
+        except OSError:
+            # Un PNG residual no debe invalidar la reindexación; será
+            # sobrescrito por el render de la página correspondiente.
+            pass
 
 
 CATALOG_PAGE_KEYWORDS = (

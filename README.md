@@ -1,4 +1,4 @@
-# DiagramIQ v0.15.3
+# DiagramIQ v0.15.4
 
 Base: v0.14.8 estable.
 
@@ -58,7 +58,7 @@ DIAGRAMIQ_AUTH_SECRET=<cadena-aleatoria-larga>
 La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/health`, `/login` y los archivos estáticos son las únicas rutas públicas necesarias. Los endpoints costosos de IA incluyen un límite básico de solicitudes por IP.
 
 
-## v0.15.3 — Aprendizaje de nomenclatura por sector/documento
+## v0.15.4 — Aprendizaje de nomenclatura por sector/documento
 
 - Aprende prefijos locales del plano usando fichas ya confirmadas dentro del mismo sector.
 - Ejemplo: en Caldera1, si una referencia `Q...` confirmada es guardamotor, otras `Q...` del mismo sector pueden clasificarse como guardamotor cuando no haya evidencia contradictoria.
@@ -66,3 +66,10 @@ La aplicación queda cerrada si `DIAGRAMIQ_PASSWORD` no está configurada. `/hea
 - Incorpora reconocimiento de `W...` como cable cuando el plano aporta evidencia de cable/conductor.
 - La evidencia local y los modelos de fabricante siempre tienen prioridad sobre una regla aprendida.
 - Si un prefijo tiene usos contradictorios, no se aplica automáticamente salvo que exista una mayoría clara.
+
+## v0.15.4 — Reindexación segura con integridad referencial
+- Corrige `ForeignKeyViolation` al reindexar documentos ya procesados.
+- La limpieza respeta el orden: conexiones → adjuntos → términos/referencias → páginas.
+- La limpieza de PostgreSQL se ejecuta en una sola transacción con rollback ante error.
+- Los PNG anteriores se eliminan solamente después de confirmar la limpieza en base de datos.
+- Conserva el aprendizaje de nomenclatura por sector/documento de v0.15.3.
